@@ -31,11 +31,12 @@ export interface PersonaConfig {
 }
 
 export interface AgentRouterConfig {
-  baseUrl: string; // e.g., 'https://openrouter.ai/api/v1' or custom router
+  baseUrl: string; // e.g., 'https://agentrouter.org/v1' or custom router
   apiKey: string;
-  model: string; // e.g., 'google/gemini-2.5-flash', 'openai/gpt-4o-mini'
+  model: string; // e.g., 'gpt-6.1-sol', 'deepseek-v4-flash', 'gpt-6-astra'
   temperature: number;
   maxTokens: number;
+  availableModels?: string[];
 }
 
 export interface SafetySettings {

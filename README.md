@@ -64,16 +64,23 @@ pnpm run zip
 
 ---
 
-## ⚙️ How to Setup with Agent Router / OpenRouter
+## ⚙️ How to Setup with AgentRouter (agentrouter.org)
 
-1. Click the **Social Auto-Chat AI** puzzle icon in your Chrome toolbar to open the **Side Panel**.
+1. Click the **Social Auto-Chat AI** icon in your Chrome toolbar to open the **Side Panel**.
 2. Click the **Settings** tab.
 3. Configure your API credentials:
-   - **API Base URL**: `https://openrouter.ai/api/v1` (or your custom router endpoint).
-   - **API Key**: Paste your Agent Router or OpenRouter key (`sk-or-v1-...`).
-   - **LLM Model**: Select a recommended model (e.g. `google/gemini-2.5-flash` for high speed & low cost, or `anthropic/claude-3.5-sonnet` for nuanced humor and conversational warmth).
-4. Click **Test API Key Connection** to verify your setup.
-5. Configure your preferred **Coalescing Buffer** (default 4.5s) and **Typing Speed** (default 60 WPM).
+   - **API Base URL**: `https://agentrouter.org/v1` (Default)
+   - **AgentRouter API Key**: Paste your token from [https://ps.air-outer.com/console/token](https://ps.air-outer.com/console/token).
+   - **LLM Model**: Choose from the top AgentRouter models:
+     - `gpt-6.1-sol` (Flagship OpenAI model)
+     - `deepseek-v4-flash` (DeepSeek ultra fast & economical)
+     - `gpt-6-astra` (OpenAI Astra model)
+     - `claude-opus-5` (Anthropic Opus)
+     - `glm-5.3` (Zhipu AI)
+4. **Fetch Available Models from API**:
+   - Click the **Fetch Available Models** button. The extension will query `GET https://agentrouter.org/v1/models` using your key and automatically populate the dropdown with all active models available on your specific account!
+5. Click **Test AgentRouter API Key** to verify your connection.
+6. The extension automatically injects the required `Originator: codex_cli_rs` and `User-Agent: codex_cli_rs/0.149.1` headers (both in `fetch()` and via Chrome `declarativeNetRequest`), completely eliminating the 401 *"unauthorized client detected"* gateway block.
 
 ---
 

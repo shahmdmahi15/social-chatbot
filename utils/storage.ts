@@ -1,12 +1,21 @@
 import type { AppSettings, ActivityLog, ChatThread, BotStatus } from '../types';
 
+export const DEFAULT_AGENTROUTER_MODELS = [
+  'gpt-6.1-sol',
+  'deepseek-v4-flash',
+  'gpt-6-astra',
+  'claude-opus-5',
+  'glm-5.3',
+];
+
 export const DEFAULT_SETTINGS: AppSettings = {
   router: {
-    baseUrl: 'https://openrouter.ai/api/v1',
+    baseUrl: 'https://agentrouter.org/v1',
     apiKey: '',
-    model: 'google/gemini-2.5-flash',
+    model: 'gpt-6.1-sol',
     temperature: 0.7,
     maxTokens: 250,
+    availableModels: DEFAULT_AGENTROUTER_MODELS,
   },
   persona: {
     userPersona: 'You are me, chatting casually on Facebook Messenger with friends and acquaintances. Sound completely natural, authentic, and human.',

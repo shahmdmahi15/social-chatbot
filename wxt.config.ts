@@ -16,10 +16,12 @@ export default defineConfig({
       'tabs',
       'activeTab',
       'scripting',
+      'declarativeNetRequest',
     ],
     host_permissions: [
       '*://*.facebook.com/*',
       '*://*.messenger.com/*',
+      '*://*.agentrouter.org/*',
       'https://*/*',
     ],
     action: {

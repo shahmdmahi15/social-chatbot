@@ -12,6 +12,9 @@ import type { ChatThread, ChatMessage, ExtensionMessage } from '../types';
 export default defineBackground(() => {
   console.log('[Social Auto-Chat AI] Background Service Worker initialized.');
 
+  // Set up declarativeNetRequest rules for AgentRouter spoofing headers
+  setupAgentRouterHeadersRule();
+
   // 1. Enable Side Panel on extension icon click
   if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
     chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch((err) => {
@@ -231,6 +234,48 @@ export default defineBackground(() => {
         threadName: thread.name,
         message: `Generation failed: ${err.message}`,
       });
+    }
+  }
+
+  async function setupAgentRouterHeadersRule() {
+    if (!chrome.declarativeNetRequest || !chrome.declarativeNetRequest.updateDynamicRules) {
+      return;
+    }
+    try {
+      const RULE_ID = 1001;
+      await chrome.declarativeNetRequest.updateDynamicRules({
+        removeRuleIds: [RULE_ID],
+        addRules: [
+          {
+            id: RULE_ID,
+            priority: 1,
+            action: {
+              type: 'modifyHeaders' as chrome.declarativeNetRequest.RuleActionType,
+              requestHeaders: [
+                {
+                  header: 'Originator',
+                  operation: 'set' as chrome.declarativeNetRequest.HeaderOperation,
+                  value: 'codex_cli_rs',
+                },
+                {
+                  header: 'User-Agent',
+                  operation: 'set' as chrome.declarativeNetRequest.HeaderOperation,
+                  value: 'codex_cli_rs/0.149.1',
+                },
+              ],
+            },
+            condition: {
+              urlFilter: '||agentrouter.org',
+              resourceTypes: [
+                'xmlhttprequest' as chrome.declarativeNetRequest.ResourceType,
+                'other' as chrome.declarativeNetRequest.ResourceType,
+              ],
+            },
+          },
+        ],
+      });
+    } catch (err) {
+      console.warn('[Social Auto-Chat AI] Failed to setup declarativeNetRequest rule:', err);
     }
   }
 });
