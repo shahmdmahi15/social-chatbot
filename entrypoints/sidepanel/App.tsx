@@ -168,6 +168,8 @@ export default function App() {
       <Header
         status={status}
         botMode={settings.botMode}
+        activeProvider={settings.activeProvider}
+        activeModel={settings.providers?.[settings.activeProvider]?.model || settings.router.model}
         onModeChange={handleModeChange}
         onTriggerReplyNow={handleTriggerReplyNow}
       />
@@ -258,6 +260,7 @@ export default function App() {
 
         {activeTab === 'settings' && (
           <SettingsTab
+            settings={settings}
             router={settings.router}
             safety={settings.safety}
             onUpdateSettings={handleUpdateSettings}

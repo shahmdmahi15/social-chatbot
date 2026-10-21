@@ -1,73 +1,222 @@
-import type { AgentRouterConfig } from '../types';
+import type {
+  LLMProviderType,
+  ProviderConfig,
+  AgentRouterConfig,
+} from '../types';
+import {
+  DEFAULT_AGENTROUTER_MODELS,
+  DEFAULT_OPENROUTER_MODELS,
+  DEFAULT_HUGGINGFACE_MODELS,
+  DEFAULT_PAWAN_MODELS,
+  DEFAULT_CUSTOM_MODELS,
+} from './storage';
 
 export interface GenerateCompletionParams {
-  config: AgentRouterConfig;
+  provider?: LLMProviderType;
+  config: ProviderConfig | AgentRouterConfig;
   systemPrompt: string;
   messages: { role: 'user' | 'assistant'; content: string }[];
   onFallback?: (oldModel: string, newModel: string, reason?: string) => void;
 }
 
-const FALLBACK_CANDIDATES = [
-  'gpt-6.1-sol',
-  'gpt-6-astra',
-  'claude-opus-5',
-  'deepseek-v4-flash',
-  'glm-5.3',
-];
+export const PROVIDER_FALLBACK_CANDIDATES: Record<LLMProviderType, string[]> = {
+  agentrouter: DEFAULT_AGENTROUTER_MODELS,
+  openrouter: DEFAULT_OPENROUTER_MODELS,
+  huggingface: DEFAULT_HUGGINGFACE_MODELS,
+  pawan: DEFAULT_PAWAN_MODELS,
+  custom: DEFAULT_CUSTOM_MODELS,
+};
 
 /**
- * Normalizes AgentRouter URL to ensure it points to the correct /v1 endpoint
+ * Normalizes provider URLs to ensure they point to the correct endpoint
  */
-export function normalizeBaseUrl(url: string): string {
-  let cleaned = (url || 'https://agentrouter.org/v1').trim().replace(/\/+$/, '');
-  // If user entered https://agentrouter.org without /v1, append /v1
-  if (cleaned.includes('agentrouter.org') && !cleaned.endsWith('/v1')) {
-    cleaned = `${cleaned}/v1`;
+export function normalizeBaseUrl(url: string, provider: LLMProviderType = 'agentrouter'): string {
+  let cleaned = (url || '').trim().replace(/\/+$/, '');
+
+  if (provider === 'agentrouter') {
+    if (!cleaned) return 'https://agentrouter.org/v1';
+    if (cleaned.includes('agentrouter.org') && !cleaned.endsWith('/v1')) {
+      cleaned = `${cleaned}/v1`;
+    }
+    return cleaned;
   }
-  return cleaned;
+
+  if (provider === 'openrouter') {
+    if (!cleaned) return 'https://openrouter.ai/api/v1';
+    if (cleaned.includes('openrouter.ai') && !cleaned.endsWith('/v1')) {
+      if (cleaned.endsWith('/api')) {
+        cleaned = `${cleaned}/v1`;
+      } else {
+        cleaned = `${cleaned}/api/v1`;
+      }
+    }
+    return cleaned;
+  }
+
+  if (provider === 'huggingface') {
+    if (!cleaned) return 'https://router.huggingface.co/v1';
+    return cleaned;
+  }
+
+  if (provider === 'pawan') {
+    if (!cleaned) return 'https://api.pawan.krd/v1';
+    if (cleaned.includes('pawan.krd') && !cleaned.endsWith('/v1') && !cleaned.endsWith('/cosmosrp/v1')) {
+      cleaned = `${cleaned}/v1`;
+    }
+    return cleaned;
+  }
+
+  if (provider === 'custom') {
+    if (!cleaned) return 'http://localhost:11434/v1';
+    return cleaned;
+  }
+
+  return cleaned || 'https://agentrouter.org/v1';
 }
 
 /**
- * Common headers for AgentRouter, including mandatory Originator fingerprint to prevent 401 unauthorized client error
+ * Builds HTTP headers tailored to each LLM provider
  */
-function getAgentRouterHeaders(apiKey: string): Record<string, string> {
-  return {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${apiKey.trim()}`,
-    'Originator': 'codex_cli_rs',
-    'User-Agent': 'codex_cli_rs/0.149.1',
-  };
+export function getProviderHeaders(
+  provider: LLMProviderType = 'agentrouter',
+  apiKey: string
+): Record<string, string> {
+  const cleanKey = (apiKey || '').trim();
+
+  switch (provider) {
+    case 'agentrouter':
+      return {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${cleanKey}`,
+        'Originator': 'codex_cli_rs',
+        'User-Agent': 'codex_cli_rs/0.149.1',
+      };
+
+    case 'openrouter':
+      return {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${cleanKey}`,
+        'HTTP-Referer': 'https://github.com/shahmdmahi15/social-chatbot',
+        'X-Title': 'Social Auto-Chat AI',
+      };
+
+    case 'huggingface':
+      return {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${cleanKey}`,
+      };
+
+    case 'pawan':
+      return {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${cleanKey}`,
+      };
+
+    case 'custom': {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (cleanKey) {
+        headers['Authorization'] = `Bearer ${cleanKey}`;
+      }
+      return headers;
+    }
+
+    default:
+      return {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${cleanKey}`,
+      };
+  }
 }
 
 /**
- * Formats API errors into helpful actionable guidance for AgentRouter users
+ * Backward compatibility alias for AgentRouter headers
  */
-function formatApiError(status: number, rawMessage: string): string {
-  if (rawMessage.includes('unauthorized client detected')) {
-    return 'AgentRouter blocked the request (unauthorized client detected). Extension has enabled the codex_cli_rs signature header to resolve this.';
-  }
-  if (rawMessage.includes('未提供令牌') || rawMessage.includes('No token provided')) {
-    return 'AgentRouter API Key is missing or empty. Please enter your API Key in Settings.';
-  }
-  if (rawMessage.includes('无效的令牌') || rawMessage.includes('invalid_api_key')) {
-    return 'AgentRouter API Key is invalid or expired. Please generate a new token at https://ps.air-outer.com/console/token';
-  }
-  if (rawMessage.toLowerCase().includes('sensitive words') || rawMessage.toLowerCase().includes('sensitive_words') || rawMessage.includes('敏感词')) {
-    return 'Sensitive words filter triggered on the selected model (common with DeepSeek on affectionate or colloquial slang words). Switched to gpt-6.1-sol via OpenAI Responses API.';
-  }
-  if (rawMessage.toLowerCase().includes('content-blocked') || rawMessage.toLowerCase().includes('content blocked')) {
-    return 'The model safety filter blocked this conversation turn. Switched automatically to gpt-6.1-sol via OpenAI Responses API.';
-  }
-  if (status === 503 || rawMessage.includes('无可用渠道')) {
-    return 'The selected model is temporarily offline or has no available channels on AgentRouter. Try selecting gpt-6.1-sol or gpt-6-astra.';
-  }
-  return `Agent Router API error (${status}): ${rawMessage}`;
+export function getAgentRouterHeaders(apiKey: string): Record<string, string> {
+  return getProviderHeaders('agentrouter', apiKey);
 }
 
 /**
- * Checks whether a given model requires the OpenAI Responses API (/v1/responses)
+ * Formats API errors into helpful actionable guidance tailored to each provider
  */
-export function isResponsesModel(model: string): boolean {
+export function formatApiError(
+  status: number,
+  rawMessage: string,
+  provider: LLMProviderType = 'agentrouter'
+): string {
+  const msg = rawMessage.toLowerCase();
+
+  if (provider === 'agentrouter') {
+    if (msg.includes('unauthorized client detected')) {
+      return 'AgentRouter blocked the request (unauthorized client detected). Extension has enabled the codex_cli_rs signature header to resolve this.';
+    }
+    if (rawMessage.includes('未提供令牌') || msg.includes('no token provided')) {
+      return 'AgentRouter API Key is missing or empty. Please enter your API Key in Settings.';
+    }
+    if (rawMessage.includes('无效的令牌') || msg.includes('invalid_api_key')) {
+      return 'AgentRouter API Key is invalid or expired. Please generate a new token at https://ps.air-outer.com/console/token';
+    }
+    if (msg.includes('sensitive words') || msg.includes('sensitive_words') || rawMessage.includes('敏感词')) {
+      return 'Sensitive words filter triggered on AgentRouter (common with DeepSeek on affectionate slang words). Switched to gpt-6.1-sol via Responses API.';
+    }
+    if (msg.includes('content-blocked') || msg.includes('content blocked')) {
+      return 'The model safety filter blocked this conversation turn. Auto-failing over to gpt-6.1-sol.';
+    }
+    if (status === 503 || rawMessage.includes('无可用渠道')) {
+      return 'The selected model is temporarily offline or has no available channels on AgentRouter. Try selecting gpt-6.1-sol or gpt-6-astra.';
+    }
+    return `AgentRouter API error (${status}): ${rawMessage}`;
+  }
+
+  if (provider === 'openrouter') {
+    if (status === 401 || msg.includes('invalid api key') || msg.includes('unauthorized')) {
+      return 'OpenRouter API Key is invalid or unauthorized. Please verify your key at https://openrouter.ai/keys';
+    }
+    if (status === 402 || msg.includes('insufficient credits') || msg.includes('credit')) {
+      return 'OpenRouter account has insufficient credits. Switch to a free model like meta-llama/llama-3.3-70b-instruct:free or add credits.';
+    }
+    if (status === 429 || msg.includes('rate limit')) {
+      return 'OpenRouter rate limit reached for this model. Try switching to a different model or wait a few moments.';
+    }
+    return `OpenRouter API error (${status}): ${rawMessage}`;
+  }
+
+  if (provider === 'huggingface') {
+    if (status === 401 || msg.includes('invalid') || msg.includes('unauthorized')) {
+      return 'Hugging Face Token is invalid. Create a fine-grained token with "Inference" permissions at https://huggingface.co/settings/tokens';
+    }
+    if (status === 503 && msg.includes('estimated_time')) {
+      return 'Hugging Face model is currently loading into serverless GPU memory. Please retry in 10-20 seconds or switch to a faster model.';
+    }
+    return `Hugging Face API error (${status}): ${rawMessage}`;
+  }
+
+  if (provider === 'pawan') {
+    if (status === 401 || status === 403 || msg.includes('invalid') || msg.includes('key')) {
+      return 'Pawan.Krd API Key is invalid or expired. Join the Pawan.krd Discord (https://pawan.krd) and type /key to obtain a free key.';
+    }
+    if (status === 429 || msg.includes('quota') || msg.includes('rate')) {
+      return 'Pawan.Krd rate limit reached. Type /claim on the Pawan Discord for daily quota or switch model to pai-001-light.';
+    }
+    return `Pawan.Krd API error (${status}): ${rawMessage}`;
+  }
+
+  if (provider === 'custom') {
+    if (status === 504 || msg.includes('fetch failed') || msg.includes('failed to fetch')) {
+      return 'Could not connect to custom/local endpoint. Ensure Ollama/LMStudio is running and allows CORS (e.g., OLLAMA_ORIGINS="*").';
+    }
+    return `Custom API error (${status}): ${rawMessage}`;
+  }
+
+  return `API error (${status}): ${rawMessage}`;
+}
+
+/**
+ * Checks whether a given model on AgentRouter requires the OpenAI Responses API (/v1/responses)
+ */
+export function isResponsesModel(model: string, provider: LLMProviderType = 'agentrouter'): boolean {
+  if (provider !== 'agentrouter') return false;
   const m = (model || '').toLowerCase();
   return (
     m.includes('gpt-6') ||
@@ -131,7 +280,6 @@ export function parseResponsesApiResponse(data: any): string {
 
 /**
  * Calls OpenAI Responses API (/v1/responses)
- * Note: Reasoning/frontier models strictly disallow custom temperature.
  */
 async function callResponsesApi(
   cleanBaseUrl: string,
@@ -140,7 +288,8 @@ async function callResponsesApi(
   systemPrompt: string,
   messages: { role: 'user' | 'assistant'; content: string }[],
   temperature = 0.7,
-  maxTokens = 250
+  maxTokens = 250,
+  provider: LLMProviderType = 'agentrouter'
 ): Promise<{ ok: boolean; status: number; text?: string; rawError?: string }> {
   const endpoint = `${cleanBaseUrl}/responses`;
   const controller = new AbortController();
@@ -157,7 +306,6 @@ async function callResponsesApi(
       : [{ role: 'user', content: 'Hi' }],
   };
 
-  // DO NOT include temperature for reasoning models by default
   if (maxTokens) {
     payload.max_output_tokens = maxTokens;
   }
@@ -165,7 +313,7 @@ async function callResponsesApi(
   try {
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: getAgentRouterHeaders(apiKey),
+      headers: getProviderHeaders(provider, apiKey),
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
@@ -190,7 +338,7 @@ async function callResponsesApi(
         try {
           const retryResp = await fetch(endpoint, {
             method: 'POST',
-            headers: getAgentRouterHeaders(apiKey),
+            headers: getProviderHeaders(provider, apiKey),
             body: JSON.stringify(minimalPayload),
           });
           if (retryResp.ok) {
@@ -225,7 +373,8 @@ async function callChatCompletionsApi(
   systemPrompt: string,
   messages: { role: 'user' | 'assistant'; content: string }[],
   temperature = 0.7,
-  maxTokens = 250
+  maxTokens = 250,
+  provider: LLMProviderType = 'agentrouter'
 ): Promise<{ ok: boolean; status: number; text?: string; rawError?: string }> {
   const endpoint = `${cleanBaseUrl}/chat/completions`;
   const controller = new AbortController();
@@ -240,10 +389,15 @@ async function callChatCompletionsApi(
     max_tokens: maxTokens,
   };
 
+  // Only include temperature if supported
+  if (temperature !== undefined && temperature !== null) {
+    payload.temperature = temperature;
+  }
+
   try {
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: getAgentRouterHeaders(apiKey),
+      headers: getProviderHeaders(provider, apiKey),
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
@@ -258,13 +412,13 @@ async function callChatCompletionsApi(
         rawError = await response.text();
       }
 
-      // Self-healing: if temperature or another parameter is unsupported
+      // Self-healing: if temperature is unsupported
       if (rawError.includes("parameter: 'temperature'") || rawError.includes('temperature is not supported')) {
         const { temperature: _, ...strippedPayload } = payload;
         try {
           const retryResp = await fetch(endpoint, {
             method: 'POST',
-            headers: getAgentRouterHeaders(apiKey),
+            headers: getProviderHeaders(provider, apiKey),
             body: JSON.stringify(strippedPayload),
           });
           if (retryResp.ok) {
@@ -291,46 +445,63 @@ async function callChatCompletionsApi(
   }
 }
 
+/**
+ * Universal Multi-Provider Chat Reply Generator
+ */
 export async function generateChatReply(
   params: GenerateCompletionParams,
   triedModels: Set<string> = new Set()
 ): Promise<string> {
   const { config, systemPrompt, messages, onFallback } = params;
+  const provider: LLMProviderType =
+    params.provider ||
+    ((config as any).id as LLMProviderType) ||
+    'agentrouter';
 
-  if (!config.apiKey || config.apiKey.trim() === '') {
-    throw new Error('Agent Router API Key is missing. Please enter your API key in the extension Side Panel settings.');
+  // Check API key requirement (Custom local may not strictly require an API key)
+  if (provider !== 'custom' && (!config.apiKey || config.apiKey.trim() === '')) {
+    const providerName =
+      provider === 'agentrouter' ? 'AgentRouter' :
+      provider === 'openrouter' ? 'OpenRouter' :
+      provider === 'huggingface' ? 'Hugging Face' :
+      provider === 'pawan' ? 'Pawan.Krd' : 'Custom';
+    throw new Error(`${providerName} API Key is missing. Please enter your API key in Settings.`);
   }
 
-  const cleanBaseUrl = normalizeBaseUrl(config.baseUrl);
-  const currentModel = config.model || 'gpt-6.1-sol';
+  const cleanBaseUrl = normalizeBaseUrl(config.baseUrl, provider);
+  const currentModel = config.model || (
+    provider === 'agentrouter' ? 'gpt-6.1-sol' :
+    provider === 'openrouter' ? 'meta-llama/llama-3.3-70b-instruct:free' :
+    provider === 'huggingface' ? 'meta-llama/Llama-3.3-70B-Instruct' :
+    provider === 'pawan' ? 'pai-001-light' : 'llama3.2'
+  );
   const temperature = config.temperature ?? 0.7;
   const maxTokens = config.maxTokens ?? 250;
 
   // Track tried models to prevent infinite loops
   triedModels.add(currentModel);
 
-  // 1. Determine preferred protocol based on model name
-  const preferResponses = isResponsesModel(currentModel);
+  // 1. Determine preferred protocol based on model name & provider
+  const preferResponses = isResponsesModel(currentModel, provider);
 
   let result = preferResponses
-    ? await callResponsesApi(cleanBaseUrl, config.apiKey, currentModel, systemPrompt, messages, temperature, maxTokens)
-    : await callChatCompletionsApi(cleanBaseUrl, config.apiKey, currentModel, systemPrompt, messages, temperature, maxTokens);
+    ? await callResponsesApi(cleanBaseUrl, config.apiKey, currentModel, systemPrompt, messages, temperature, maxTokens, provider)
+    : await callChatCompletionsApi(cleanBaseUrl, config.apiKey, currentModel, systemPrompt, messages, temperature, maxTokens, provider);
 
-  // 2. Intelligent Protocol Auto-Switching:
-  // If endpoint explicitly advises using the other endpoint
-  if (!result.ok && result.rawError) {
+  // 2. Intelligent Protocol Auto-Switching for AgentRouter
+  if (!result.ok && result.rawError && provider === 'agentrouter') {
     const errorLower = result.rawError.toLowerCase();
 
     if (errorLower.includes('/v1/responses') || errorLower.includes('responses api') || result.rawError.includes('请改用 /v1/responses')) {
-      console.log(`[AgentRouter] Auto-switching ${currentModel} to /v1/responses...`);
-      result = await callResponsesApi(cleanBaseUrl, config.apiKey, currentModel, systemPrompt, messages, temperature, maxTokens);
+      console.log(`[Social Auto-Chat] Auto-switching ${currentModel} to /v1/responses...`);
+      result = await callResponsesApi(cleanBaseUrl, config.apiKey, currentModel, systemPrompt, messages, temperature, maxTokens, provider);
     } else if (errorLower.includes('/v1/chat/completions') || errorLower.includes('chat completions')) {
-      console.log(`[AgentRouter] Auto-switching ${currentModel} to /v1/chat/completions...`);
-      result = await callChatCompletionsApi(cleanBaseUrl, config.apiKey, currentModel, systemPrompt, messages, temperature, maxTokens);
+      console.log(`[Social Auto-Chat] Auto-switching ${currentModel} to /v1/chat/completions...`);
+      result = await callChatCompletionsApi(cleanBaseUrl, config.apiKey, currentModel, systemPrompt, messages, temperature, maxTokens, provider);
     }
   }
 
-  // 3. Sensitive Words / Content-Blocked / Timeout Auto-Failover:
+  // 3. Auto-Failover on transient errors, sensitive words, or rate limits
   if (!result.ok && result.rawError) {
     const rawLower = result.rawError.toLowerCase();
     const shouldFailover =
@@ -347,18 +518,19 @@ export async function generateChatReply(
       rawLower.includes('timed out');
 
     if (shouldFailover) {
-      // Find the next model candidate that hasn't been tried yet
-      const fallbackModel = FALLBACK_CANDIDATES.find((m) => !triedModels.has(m) && m !== currentModel);
+      const candidates = PROVIDER_FALLBACK_CANDIDATES[provider] || [];
+      const fallbackModel = candidates.find((m) => !triedModels.has(m) && m !== currentModel);
 
       if (fallbackModel) {
         const shortReason = result.rawError.length > 70 ? `${result.rawError.slice(0, 67)}...` : result.rawError;
-        console.warn(`[AgentRouter] ${currentModel} failed: ${shortReason}. Auto-failing over to ${fallbackModel}...`);
+        console.warn(`[Social Auto-Chat] ${provider} ${currentModel} failed: ${shortReason}. Auto-failing over to ${fallbackModel}...`);
         if (onFallback) {
           onFallback(currentModel, fallbackModel, shortReason);
         }
         return generateChatReply(
           {
             ...params,
+            provider,
             config: { ...config, model: fallbackModel },
           },
           triedModels
@@ -366,11 +538,11 @@ export async function generateChatReply(
       }
     }
 
-    throw new Error(formatApiError(result.status, result.rawError));
+    throw new Error(formatApiError(result.status, result.rawError, provider));
   }
 
   if (!result.text) {
-    throw new Error('Empty or invalid completion returned by Agent Router.');
+    throw new Error(`Empty or invalid completion returned by ${provider}.`);
   }
 
   let replyText = result.text.trim();
@@ -380,66 +552,127 @@ export async function generateChatReply(
 }
 
 /**
- * Queries AgentRouter's GET /v1/models endpoint to fetch all active models available on the user's account
+ * Fetches available models from the selected provider's /models endpoint
  */
-export async function fetchAvailableModels(config: AgentRouterConfig): Promise<string[]> {
-  if (!config.apiKey || config.apiKey.trim() === '') {
-    throw new Error('Please enter an Agent Router API Key first to fetch models.');
+export async function fetchAvailableModels(
+  config: ProviderConfig | AgentRouterConfig,
+  explicitProvider?: LLMProviderType
+): Promise<string[]> {
+  const provider: LLMProviderType =
+    explicitProvider ||
+    ((config as any).id as LLMProviderType) ||
+    'agentrouter';
+
+  if (provider !== 'custom' && (!config.apiKey || config.apiKey.trim() === '')) {
+    throw new Error(`Please enter an API Key first to fetch models.`);
   }
 
-  const cleanBaseUrl = normalizeBaseUrl(config.baseUrl);
+  const cleanBaseUrl = normalizeBaseUrl(config.baseUrl, provider);
   const endpoint = `${cleanBaseUrl}/models`;
 
-  const response = await fetch(endpoint, {
-    method: 'GET',
-    headers: getAgentRouterHeaders(config.apiKey),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-  if (!response.ok) {
-    let rawError = '';
-    try {
-      const errorJson = await response.json();
-      rawError = errorJson.error?.message || errorJson.message || JSON.stringify(errorJson);
-    } catch {
-      rawError = await response.text();
+  try {
+    const response = await fetch(endpoint, {
+      method: 'GET',
+      headers: getProviderHeaders(provider, config.apiKey),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      let rawError = '';
+      try {
+        const errorJson = await response.json();
+        rawError = errorJson.error?.message || errorJson.message || JSON.stringify(errorJson);
+      } catch {
+        rawError = await response.text();
+      }
+      throw new Error(formatApiError(response.status, rawError, provider));
     }
-    throw new Error(formatApiError(response.status, rawError));
-  }
 
-  const json = await response.json();
-  const models: string[] = [];
+    const json = await response.json();
+    const models: string[] = [];
 
-  if (Array.isArray(json.data)) {
-    for (const item of json.data) {
-      if (item && item.id && typeof item.id === 'string') {
-        models.push(item.id);
+    // Handle standard OpenAI { data: [{ id: "..." }] } format
+    if (Array.isArray(json.data)) {
+      for (const item of json.data) {
+        if (item && item.id && typeof item.id === 'string') {
+          models.push(item.id);
+        }
+      }
+    } else if (Array.isArray(json.models)) {
+      // Ollama format { models: [{ name: "..." }] }
+      for (const item of json.models) {
+        const id = item.name || item.id || item.model;
+        if (typeof id === 'string') {
+          models.push(id);
+        }
+      }
+    } else if (Array.isArray(json)) {
+      for (const item of json) {
+        const id = typeof item === 'string' ? item : item?.id || item?.name;
+        if (typeof id === 'string') {
+          models.push(id);
+        }
       }
     }
-  }
 
-  return models;
+    return models;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error('Fetching models timed out after 15s.');
+    }
+    throw err;
+  }
 }
 
-export async function testConnection(config: AgentRouterConfig): Promise<{ success: boolean; message: string; modelsCount?: number }> {
+/**
+ * Tests connection to the active provider
+ */
+export async function testConnection(
+  config: ProviderConfig | AgentRouterConfig,
+  explicitProvider?: LLMProviderType
+): Promise<{ success: boolean; message: string; modelsCount?: number }> {
+  const provider: LLMProviderType =
+    explicitProvider ||
+    ((config as any).id as LLMProviderType) ||
+    'agentrouter';
+
   try {
     // 1. Try to fetch available models
-    const models = await fetchAvailableModels(config);
+    const models = await fetchAvailableModels(config, provider);
+    const providerName =
+      provider === 'agentrouter' ? 'AgentRouter' :
+      provider === 'openrouter' ? 'OpenRouter' :
+      provider === 'huggingface' ? 'Hugging Face' :
+      provider === 'pawan' ? 'Pawan.Krd' : 'Custom';
+
     return {
       success: true,
-      message: `Connected to AgentRouter successfully! ${models.length} active models available on your account.`,
+      message: `Connected to ${providerName} successfully! Found ${models.length} active models.`,
       modelsCount: models.length,
     };
   } catch (err: any) {
-    // Fallback: try minimal ping
+    // 2. Fallback: try minimal single-token ping
     try {
       const reply = await generateChatReply({
+        provider,
         config,
         systemPrompt: 'Reply with "OK"',
         messages: [{ role: 'user', content: 'hi' }],
       });
-      return { success: true, message: `Connected to AgentRouter! Response: ${reply.slice(0, 50)}` };
+      return {
+        success: true,
+        message: `Connected successfully! Response: ${reply.slice(0, 45)}`,
+      };
     } catch (fallbackErr: any) {
-      return { success: false, message: fallbackErr.message || err.message || 'Connection failed' };
+      return {
+        success: false,
+        message: fallbackErr.message || err.message || 'Connection failed',
+      };
     }
   }
 }

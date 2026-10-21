@@ -12,8 +12,8 @@ import type { ChatThread, ChatMessage, ExtensionMessage } from '../types';
 export default defineBackground(() => {
   console.log('[Social Auto-Chat AI] Background Service Worker initialized.');
 
-  // Set up declarativeNetRequest rules for AgentRouter spoofing headers
-  setupAgentRouterHeadersRule();
+  // Set up declarativeNetRequest rules for AgentRouter & OpenRouter headers
+  setupProviderHeadersRules();
 
   // 1. Enable Side Panel on extension icon click
   if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
@@ -100,7 +100,7 @@ export default defineBackground(() => {
   });
 
   /**
-   * Handles incoming message bursts, coalescing rapid replies, and dispatching to LLM
+   * Filters and buffers incoming messages with a coalescing debounce
    */
   async function handleNewIncomingMessages(
     thread: ChatThread,
@@ -114,39 +114,37 @@ export default defineBackground(() => {
       return;
     }
 
-    // Check if this thread/contact is targeted (or if target list is empty, default to active chat)
+    // Check targeting logic
     const isTargeted =
       settings.targetAllContacts ||
-      settings.targetContacts.length === 0 ||
       settings.targetContacts.includes(thread.id) ||
-      settings.targetContacts.some((name) =>
-        thread.name.toLowerCase().includes(name.toLowerCase())
+      settings.targetContacts.some((c) =>
+        thread.name.toLowerCase().includes(c.toLowerCase())
       );
 
     if (!isTargeted) {
+      console.log(`[Social Auto-Chat AI] Skipping thread ${thread.name} (not targeted)`);
       return;
     }
 
-    // Check if the API key is configured
-    if (!settings.router.apiKey) {
-      await addLog({
-        type: 'error',
-        threadName: thread.name,
-        message: 'Agent Router API key is not configured. Please enter your API key in Settings.',
-      });
+    // Check if last message is from 'them'
+    const lastMessage = messages[messages.length - 1];
+    if (!lastMessage || lastMessage.sender !== 'them') {
       return;
     }
 
-    // Clear existing coalescing timer for this thread if one is active
+    await setCurrentThread(thread);
+
+    // Cancel existing coalescing timer for this thread if one is running
     if (coalescingTimers.has(thread.id)) {
-      clearTimeout(coalescingTimers.get(thread.id));
+      clearTimeout(coalescingTimers.get(thread.id)!);
     }
 
     await setBotStatus('coalescing');
     await addLog({
       type: 'coalescing',
       threadName: thread.name,
-      message: `New message from ${thread.name}. Waiting ${settings.safety.coalesceDelayMs / 1000}s for consecutive bubbles...`,
+      message: `Received: "${lastMessage.text}". Waiting ${settings.safety.coalesceDelayMs / 1000}s for consecutive messages...`,
     });
 
     // Start coalescing timer
@@ -159,7 +157,7 @@ export default defineBackground(() => {
   }
 
   /**
-   * Calls the Agent Router with assembled prompt and history, then injects or requests approval
+   * Calls the active LLM Provider with assembled prompt and history, then injects or requests approval
    */
   async function executeGenerationAndReply(
     thread: ChatThread,
@@ -169,10 +167,18 @@ export default defineBackground(() => {
     const settings = await getSettings();
     await setBotStatus('thinking');
 
+    const activeProvider = settings.activeProvider || 'agentrouter';
+    const activeConfig =
+      settings.providers?.[activeProvider] ||
+      settings.providers?.agentrouter ||
+      settings.router;
+
+    const providerName = activeConfig.name || activeProvider.toUpperCase();
+
     await addLog({
       type: 'thinking',
       threadName: thread.name,
-      message: `Analyzing conversation vibe & generating reply via Agent Router (${settings.router.model})...`,
+      message: `Analyzing conversation vibe & generating reply via ${providerName} (${activeConfig.model})...`,
     });
 
     try {
@@ -180,7 +186,8 @@ export default defineBackground(() => {
       const formattedHistory = formatChatHistoryForLLM(messages);
 
       const generatedReply = await generateChatReply({
-        config: settings.router,
+        provider: activeProvider,
+        config: activeConfig,
         systemPrompt,
         messages: formattedHistory,
         onFallback: async (oldModel, newModel, reason) => {
@@ -260,17 +267,22 @@ export default defineBackground(() => {
     }
   }
 
-  async function setupAgentRouterHeadersRule() {
+  /**
+   * Sets up declarativeNetRequest rules for spoofing required headers for AgentRouter & OpenRouter
+   */
+  async function setupProviderHeadersRules() {
     if (!chrome.declarativeNetRequest || !chrome.declarativeNetRequest.updateDynamicRules) {
       return;
     }
     try {
-      const RULE_ID = 1001;
+      const AGENTROUTER_RULE_ID = 1001;
+      const OPENROUTER_RULE_ID = 1002;
+
       await chrome.declarativeNetRequest.updateDynamicRules({
-        removeRuleIds: [RULE_ID],
+        removeRuleIds: [AGENTROUTER_RULE_ID, OPENROUTER_RULE_ID],
         addRules: [
           {
-            id: RULE_ID,
+            id: AGENTROUTER_RULE_ID,
             priority: 1,
             action: {
               type: 'modifyHeaders' as chrome.declarativeNetRequest.RuleActionType,
@@ -295,10 +307,36 @@ export default defineBackground(() => {
               ],
             },
           },
+          {
+            id: OPENROUTER_RULE_ID,
+            priority: 1,
+            action: {
+              type: 'modifyHeaders' as chrome.declarativeNetRequest.RuleActionType,
+              requestHeaders: [
+                {
+                  header: 'HTTP-Referer',
+                  operation: 'set' as chrome.declarativeNetRequest.HeaderOperation,
+                  value: 'https://github.com/shahmdmahi15/social-chatbot',
+                },
+                {
+                  header: 'X-Title',
+                  operation: 'set' as chrome.declarativeNetRequest.HeaderOperation,
+                  value: 'Social Auto-Chat AI',
+                },
+              ],
+            },
+            condition: {
+              urlFilter: '||openrouter.ai',
+              resourceTypes: [
+                'xmlhttprequest' as chrome.declarativeNetRequest.ResourceType,
+                'other' as chrome.declarativeNetRequest.ResourceType,
+              ],
+            },
+          },
         ],
       });
     } catch (err) {
-      console.warn('[Social Auto-Chat AI] Failed to setup declarativeNetRequest rule:', err);
+      console.warn('[Social Auto-Chat AI] Failed to setup declarativeNetRequest rules:', err);
     }
   }
 });

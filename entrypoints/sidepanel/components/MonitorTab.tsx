@@ -108,8 +108,26 @@ export const MonitorTab: React.FC<Props> = ({
     return c.name.toLowerCase().includes(q) || (c.snippet && c.snippet.toLowerCase().includes(q));
   });
 
+  const activeProvider = settings.activeProvider || 'agentrouter';
+  const activeConfig =
+    settings.providers?.[activeProvider] ||
+    settings.providers?.agentrouter ||
+    settings.router;
+  const providerName = activeConfig?.name || activeProvider.toUpperCase();
+
   return (
     <div className="space-y-4">
+      {/* Active LLM Provider Quick Banner */}
+      <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-slate-900/80 border border-slate-800 text-xs shadow-sm">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <Zap className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+          <span className="text-slate-400 text-[11px] truncate">
+            Active Provider: <span className="text-slate-200 font-semibold">{providerName}</span>
+            <span className="text-cyan-400 font-mono ml-1">({activeConfig?.model})</span>
+          </span>
+        </div>
+      </div>
+
       {/* 1. Active Detected Messenger Conversation */}
       <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 shadow-md">
         <div className="flex items-center justify-between mb-2">

@@ -1,28 +1,49 @@
 import React from 'react';
-import type { BotMode, BotStatus } from '../../../types';
+import type { BotMode, BotStatus, LLMProviderType } from '../../../types';
 import { StatusBadge } from './StatusBadge';
-import { MessageSquareText, Zap, ShieldCheck, PowerOff } from 'lucide-react';
+import { MessageSquareText, Zap, ShieldCheck, PowerOff, Cpu } from 'lucide-react';
 
 interface Props {
   status: BotStatus;
   botMode: BotMode;
+  activeProvider?: LLMProviderType;
+  activeModel?: string;
   onModeChange: (mode: BotMode) => void;
   onTriggerReplyNow?: () => void;
 }
 
-export const Header: React.FC<Props> = ({ status, botMode, onModeChange, onTriggerReplyNow }) => {
+export const Header: React.FC<Props> = ({
+  status,
+  botMode,
+  activeProvider = 'agentrouter',
+  activeModel,
+  onModeChange,
+  onTriggerReplyNow,
+}) => {
+  const providerLabel =
+    activeProvider === 'agentrouter' ? 'AgentRouter' :
+    activeProvider === 'openrouter' ? 'OpenRouter' :
+    activeProvider === 'huggingface' ? 'Hugging Face' :
+    activeProvider === 'pawan' ? 'Pawan.Krd' : 'Custom';
+
   return (
     <header className="px-4 py-3 bg-slate-900/90 border-b border-slate-800 sticky top-0 z-20 backdrop-blur-md space-y-2.5">
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/20 shrink-0">
             <MessageSquareText className="w-4 h-4 text-white" />
           </div>
-          <div>
-            <h1 className="text-sm font-bold bg-gradient-to-r from-cyan-300 via-indigo-200 to-white bg-clip-text text-transparent">
+          <div className="min-w-0">
+            <h1 className="text-sm font-bold bg-gradient-to-r from-cyan-300 via-indigo-200 to-white bg-clip-text text-transparent truncate">
               Social Auto-Chat AI
             </h1>
-            <p className="text-[10px] text-slate-400">Messenger Agent</p>
+            <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+              <span className="truncate">Messenger Agent</span>
+              <span className="text-slate-600">•</span>
+              <span className="text-cyan-400 font-mono font-medium truncate">
+                {providerLabel}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -77,7 +98,7 @@ export const Header: React.FC<Props> = ({ status, botMode, onModeChange, onTrigg
         )}
         {botMode === 'manual_approval' && (
           <span className="text-amber-300 flex items-center justify-center gap-1">
-            <ShieldCheck className="w-3 h-3" /> Review First Active: Drafts are prepared for your review
+            <ShieldCheck className="w-3 h-3" /> Review First Active: Drafts are prepared in Messenger for your review
           </span>
         )}
         {botMode === 'disabled' && (

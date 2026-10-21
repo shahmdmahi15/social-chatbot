@@ -38,10 +38,23 @@ export interface PersonaConfig {
   useEmojis: boolean;
 }
 
-export interface AgentRouterConfig {
-  baseUrl: string; // e.g., 'https://agentrouter.org/v1' or custom router
+export type LLMProviderType = 'agentrouter' | 'openrouter' | 'huggingface' | 'pawan' | 'custom';
+
+export interface ProviderConfig {
+  id: LLMProviderType;
+  name: string;
+  baseUrl: string;
   apiKey: string;
-  model: string; // e.g., 'gpt-6.1-sol', 'deepseek-v4-flash', 'gpt-6-astra'
+  model: string;
+  temperature: number;
+  maxTokens: number;
+  availableModels: string[];
+}
+
+export interface AgentRouterConfig {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
   temperature: number;
   maxTokens: number;
   availableModels?: string[];
@@ -65,6 +78,9 @@ export interface ActivityLog {
 }
 
 export interface AppSettings {
+  activeProvider: LLMProviderType;
+  providers: Record<LLMProviderType, ProviderConfig>;
+  // Maintained for backward compatibility with existing components
   router: AgentRouterConfig;
   persona: PersonaConfig;
   safety: SafetySettings;

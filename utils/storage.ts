@@ -1,4 +1,13 @@
-import type { AppSettings, ActivityLog, ChatThread, BotStatus, DiscoveredContact } from '../types';
+import type {
+  AppSettings,
+  ActivityLog,
+  ChatThread,
+  BotStatus,
+  DiscoveredContact,
+  LLMProviderType,
+  ProviderConfig,
+  AgentRouterConfig,
+} from '../types';
 
 export const DEFAULT_AGENTROUTER_MODELS = [
   'gpt-6.1-sol',
@@ -8,7 +17,94 @@ export const DEFAULT_AGENTROUTER_MODELS = [
   'glm-5.3',
 ];
 
+export const DEFAULT_OPENROUTER_MODELS = [
+  'meta-llama/llama-3.3-70b-instruct:free',
+  'deepseek/deepseek-chat',
+  'deepseek/deepseek-r1:free',
+  'google/gemini-2.0-flash-exp:free',
+  'openai/gpt-4o-mini',
+  'anthropic/claude-3.5-sonnet',
+];
+
+export const DEFAULT_HUGGINGFACE_MODELS = [
+  'meta-llama/Llama-3.3-70B-Instruct',
+  'Qwen/Qwen2.5-72B-Instruct',
+  'deepseek-ai/DeepSeek-R1-Distill-Qwen-32B',
+  'mistralai/Mistral-7B-Instruct-v0.3',
+  'openai/gpt-oss-120b',
+];
+
+export const DEFAULT_PAWAN_MODELS = [
+  'pai-001-light',
+  'pai-001',
+  'gpt-3.5-turbo',
+  'gpt-4o',
+  'cosmosrp',
+];
+
+export const DEFAULT_CUSTOM_MODELS = [
+  'llama3.2',
+  'mistral',
+  'qwen2.5',
+  'deepseek-r1',
+];
+
+export const DEFAULT_PROVIDERS: Record<LLMProviderType, ProviderConfig> = {
+  agentrouter: {
+    id: 'agentrouter',
+    name: 'AgentRouter',
+    baseUrl: 'https://agentrouter.org/v1',
+    apiKey: '',
+    model: 'gpt-6.1-sol',
+    temperature: 0.7,
+    maxTokens: 250,
+    availableModels: DEFAULT_AGENTROUTER_MODELS,
+  },
+  openrouter: {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    apiKey: '',
+    model: 'meta-llama/llama-3.3-70b-instruct:free',
+    temperature: 0.7,
+    maxTokens: 250,
+    availableModels: DEFAULT_OPENROUTER_MODELS,
+  },
+  huggingface: {
+    id: 'huggingface',
+    name: 'Hugging Face Router',
+    baseUrl: 'https://router.huggingface.co/v1',
+    apiKey: '',
+    model: 'meta-llama/Llama-3.3-70B-Instruct',
+    temperature: 0.7,
+    maxTokens: 250,
+    availableModels: DEFAULT_HUGGINGFACE_MODELS,
+  },
+  pawan: {
+    id: 'pawan',
+    name: 'Pawan.Krd',
+    baseUrl: 'https://api.pawan.krd/v1',
+    apiKey: '',
+    model: 'pai-001-light',
+    temperature: 0.7,
+    maxTokens: 250,
+    availableModels: DEFAULT_PAWAN_MODELS,
+  },
+  custom: {
+    id: 'custom',
+    name: 'Custom / Local API',
+    baseUrl: 'http://localhost:11434/v1',
+    apiKey: '',
+    model: 'llama3.2',
+    temperature: 0.7,
+    maxTokens: 250,
+    availableModels: DEFAULT_CUSTOM_MODELS,
+  },
+};
+
 export const DEFAULT_SETTINGS: AppSettings = {
+  activeProvider: 'agentrouter',
+  providers: DEFAULT_PROVIDERS,
   router: {
     baseUrl: 'https://agentrouter.org/v1',
     apiKey: '',
@@ -66,6 +162,71 @@ if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
   }
 }
 
+/**
+ * Normalizes stored settings and seamlessly migrates legacy settings
+ */
+function normalizeLoadedSettings(stored: any): AppSettings {
+  if (!stored) return DEFAULT_SETTINGS;
+
+  const activeProvider: LLMProviderType = stored.activeProvider || 'agentrouter';
+
+  // Merge each provider config with defaults
+  const providers: Record<LLMProviderType, ProviderConfig> = {
+    agentrouter: {
+      ...DEFAULT_PROVIDERS.agentrouter,
+      ...(stored.providers?.agentrouter || {}),
+    },
+    openrouter: {
+      ...DEFAULT_PROVIDERS.openrouter,
+      ...(stored.providers?.openrouter || {}),
+    },
+    huggingface: {
+      ...DEFAULT_PROVIDERS.huggingface,
+      ...(stored.providers?.huggingface || {}),
+    },
+    pawan: {
+      ...DEFAULT_PROVIDERS.pawan,
+      ...(stored.providers?.pawan || {}),
+    },
+    custom: {
+      ...DEFAULT_PROVIDERS.custom,
+      ...(stored.providers?.custom || {}),
+    },
+  };
+
+  // If legacy stored.router exists and providers.agentrouter is empty, migrate it
+  if (stored.router?.apiKey && !providers.agentrouter.apiKey) {
+    providers.agentrouter.apiKey = stored.router.apiKey;
+    providers.agentrouter.baseUrl = stored.router.baseUrl || providers.agentrouter.baseUrl;
+    providers.agentrouter.model = stored.router.model || providers.agentrouter.model;
+    providers.agentrouter.temperature = stored.router.temperature ?? providers.agentrouter.temperature;
+    providers.agentrouter.maxTokens = stored.router.maxTokens ?? providers.agentrouter.maxTokens;
+    if (stored.router.availableModels?.length) {
+      providers.agentrouter.availableModels = stored.router.availableModels;
+    }
+  }
+
+  // Ensure router object mirrors active agentrouter provider for backward compatibility
+  const router: AgentRouterConfig = {
+    baseUrl: providers.agentrouter.baseUrl,
+    apiKey: providers.agentrouter.apiKey,
+    model: providers.agentrouter.model,
+    temperature: providers.agentrouter.temperature,
+    maxTokens: providers.agentrouter.maxTokens,
+    availableModels: providers.agentrouter.availableModels,
+  };
+
+  return {
+    ...DEFAULT_SETTINGS,
+    ...stored,
+    activeProvider,
+    providers,
+    router,
+    persona: { ...DEFAULT_SETTINGS.persona, ...(stored.persona || {}) },
+    safety: { ...DEFAULT_SETTINGS.safety, ...(stored.safety || {}) },
+  };
+}
+
 export async function getSettings(): Promise<AppSettings> {
   if (cachedSettings) {
     return cachedSettings;
@@ -80,15 +241,9 @@ export async function getSettings(): Promise<AppSettings> {
       cachedSettings = DEFAULT_SETTINGS;
       return DEFAULT_SETTINGS;
     }
-    const stored = result[STORAGE_KEYS.SETTINGS];
-    cachedSettings = {
-      ...DEFAULT_SETTINGS,
-      ...stored,
-      router: { ...DEFAULT_SETTINGS.router, ...(stored.router || {}) },
-      persona: { ...DEFAULT_SETTINGS.persona, ...(stored.persona || {}) },
-      safety: { ...DEFAULT_SETTINGS.safety, ...(stored.safety || {}) },
-    };
-    return cachedSettings;
+    const normalized = normalizeLoadedSettings(result[STORAGE_KEYS.SETTINGS]);
+    cachedSettings = normalized;
+    return normalized;
   } catch {
     return DEFAULT_SETTINGS;
   }
@@ -101,13 +256,59 @@ export function saveSettings(partial: Partial<AppSettings>): Promise<AppSettings
     }
     try {
       const current = await getSettings();
+
+      // Merge providers carefully
+      const updatedProviders: Record<LLMProviderType, ProviderConfig> = {
+        agentrouter: {
+          ...current.providers.agentrouter,
+          ...(partial.providers?.agentrouter || {}),
+        },
+        openrouter: {
+          ...current.providers.openrouter,
+          ...(partial.providers?.openrouter || {}),
+        },
+        huggingface: {
+          ...current.providers.huggingface,
+          ...(partial.providers?.huggingface || {}),
+        },
+        pawan: {
+          ...current.providers.pawan,
+          ...(partial.providers?.pawan || {}),
+        },
+        custom: {
+          ...current.providers.custom,
+          ...(partial.providers?.custom || {}),
+        },
+      };
+
+      // If partial has legacy router updates, keep providers.agentrouter in sync
+      if (partial.router) {
+        updatedProviders.agentrouter = {
+          ...updatedProviders.agentrouter,
+          ...partial.router,
+        };
+      }
+
+      // Backward compatible router object mirroring providers.agentrouter
+      const updatedRouter: AgentRouterConfig = {
+        baseUrl: updatedProviders.agentrouter.baseUrl,
+        apiKey: updatedProviders.agentrouter.apiKey,
+        model: updatedProviders.agentrouter.model,
+        temperature: updatedProviders.agentrouter.temperature,
+        maxTokens: updatedProviders.agentrouter.maxTokens,
+        availableModels: updatedProviders.agentrouter.availableModels,
+      };
+
       const updated: AppSettings = {
         ...current,
         ...partial,
-        router: { ...current.router, ...(partial.router || {}) },
+        activeProvider: partial.activeProvider || current.activeProvider || 'agentrouter',
+        providers: updatedProviders,
+        router: updatedRouter,
         persona: { ...current.persona, ...(partial.persona || {}) },
         safety: { ...current.safety, ...(partial.safety || {}) },
       };
+
       cachedSettings = updated;
       await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: updated });
       return updated;
