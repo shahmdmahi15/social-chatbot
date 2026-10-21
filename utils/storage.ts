@@ -18,8 +18,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     availableModels: DEFAULT_AGENTROUTER_MODELS,
   },
   persona: {
-    userPersona: 'You are me, chatting casually on Facebook Messenger with friends and acquaintances. Sound completely natural, authentic, and human.',
-    customInstructions: 'Keep replies concise and authentic. If asked what I am doing, act busy but friendly.',
+    userPersona: 'Casual, friendly, authentic, and responsive. Chat like a real person in quick natural messages.',
+    customInstructions: 'Be warm, responsive, and match the vibe and closeness of the conversation.',
     languagePreference: 'auto',
     slangStyle: 'natural_match',
     replyLength: 'short',
@@ -46,34 +46,54 @@ const STORAGE_KEYS = {
   CONTACTS: 'social_chatbot_contacts',
 };
 
+// In-memory cache and sequential atomic queue to prevent race conditions during typing/saving
+let cachedSettings: AppSettings | null = null;
+let savePromiseChain: Promise<AppSettings> = Promise.resolve(DEFAULT_SETTINGS);
+
+if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === 'local' && changes[STORAGE_KEYS.SETTINGS]?.newValue) {
+      cachedSettings = changes[STORAGE_KEYS.SETTINGS].newValue;
+    }
+  });
+}
+
 export async function getSettings(): Promise<AppSettings> {
+  if (cachedSettings) {
+    return cachedSettings;
+  }
   const result = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
   if (!result[STORAGE_KEYS.SETTINGS]) {
     await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: DEFAULT_SETTINGS });
+    cachedSettings = DEFAULT_SETTINGS;
     return DEFAULT_SETTINGS;
   }
   const stored = result[STORAGE_KEYS.SETTINGS];
-  return {
+  cachedSettings = {
     ...DEFAULT_SETTINGS,
     ...stored,
     router: { ...DEFAULT_SETTINGS.router, ...(stored.router || {}) },
     persona: { ...DEFAULT_SETTINGS.persona, ...(stored.persona || {}) },
     safety: { ...DEFAULT_SETTINGS.safety, ...(stored.safety || {}) },
   };
+  return cachedSettings;
 }
 
-export async function saveSettings(settings: Partial<AppSettings>): Promise<AppSettings> {
-  const result = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
-  const current = result[STORAGE_KEYS.SETTINGS] || DEFAULT_SETTINGS;
-  const updated: AppSettings = {
-    ...current,
-    ...settings,
-    router: { ...current.router, ...(settings.router || {}) },
-    persona: { ...current.persona, ...(settings.persona || {}) },
-    safety: { ...current.safety, ...(settings.safety || {}) },
-  };
-  await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: updated });
-  return updated;
+export function saveSettings(partial: Partial<AppSettings>): Promise<AppSettings> {
+  savePromiseChain = savePromiseChain.then(async () => {
+    const current = await getSettings();
+    const updated: AppSettings = {
+      ...current,
+      ...partial,
+      router: { ...current.router, ...(partial.router || {}) },
+      persona: { ...current.persona, ...(partial.persona || {}) },
+      safety: { ...current.safety, ...(partial.safety || {}) },
+    };
+    cachedSettings = updated;
+    await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: updated });
+    return updated;
+  });
+  return savePromiseChain;
 }
 
 export async function getLogs(): Promise<ActivityLog[]> {

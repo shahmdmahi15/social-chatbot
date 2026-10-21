@@ -21,6 +21,7 @@ import {
 interface Props {
   router: AgentRouterConfig;
   safety: SafetySettings;
+  onUpdateSettings?: (settings: Partial<AppSettings>) => void;
   onUpdateRouter: (router: Partial<AgentRouterConfig>) => void;
   onUpdateSafety: (safety: Partial<SafetySettings>) => void;
 }
@@ -28,6 +29,7 @@ interface Props {
 export const SettingsTab: React.FC<Props> = ({
   router,
   safety,
+  onUpdateSettings,
   onUpdateRouter,
   onUpdateSafety,
 }) => {
@@ -39,17 +41,21 @@ export const SettingsTab: React.FC<Props> = ({
   const [savedSettings, setSavedSettings] = useState(false);
 
   const handleManualSave = () => {
-    onUpdateRouter({ ...router });
-    onUpdateSafety({ ...safety });
+    if (onUpdateSettings) {
+      onUpdateSettings({ router: { ...router }, safety: { ...safety } });
+    } else {
+      onUpdateRouter({ ...router });
+      onUpdateSafety({ ...safety });
+    }
     setSavedSettings(true);
     setTimeout(() => setSavedSettings(false), 2000);
   };
 
   // Curated AgentRouter primary models
   const PRIMARY_MODELS = [
-    { id: 'gpt-6.1-sol', label: 'gpt-6.1-sol (OpenAI Flagship)' },
-    { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash (DeepSeek Fast)' },
-    { id: 'gpt-6-astra', label: 'gpt-6-astra (OpenAI Astra)' },
+    { id: 'gpt-6.1-sol', label: 'gpt-6.1-sol (Recommended - OpenAI Flagship)' },
+    { id: 'gpt-6-astra', label: 'gpt-6-astra (OpenAI Astra - Fast & Warm)' },
+    { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash (DeepSeek Fast - Strict Moderation)' },
     { id: 'claude-opus-5', label: 'claude-opus-5 (Anthropic Opus)' },
     { id: 'glm-5.3', label: 'glm-5.3 (Zhipu AI)' },
   ];
@@ -243,6 +249,19 @@ export const SettingsTab: React.FC<Props> = ({
               ))}
             </optgroup>
           </select>
+
+          {/* Model Safety Notice if DeepSeek is selected */}
+          {router.model.includes('deepseek') && (
+            <div className="p-2.5 rounded-lg bg-amber-950/40 border border-amber-800/60 text-[11px] text-amber-300/90 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <span className="font-semibold block text-amber-200">Strict Safety Filter Notice:</span>
+                <span className="text-[10px] text-amber-300/80 leading-normal block">
+                  DeepSeek&apos;s API enforces strict domestic filters that block romantic affection or colloquial slang (&ldquo;jan&rdquo;, &ldquo;ailabiu&rdquo;) with <em>content-blocked</em>. If blocked, the extension auto-fails over to <strong>gpt-6.1-sol</strong>. We recommend keeping <strong>gpt-6.1-sol</strong> selected for casual social chatting.
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Active Model Badges */}
           {router.availableModels && router.availableModels.length > 0 && (

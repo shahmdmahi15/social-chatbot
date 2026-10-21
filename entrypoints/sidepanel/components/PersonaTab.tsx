@@ -87,14 +87,14 @@ export const PersonaTab: React.FC<Props> = ({ persona, onChange }) => {
       <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 shadow-md space-y-2">
         <label className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
           <Bot className="w-4 h-4 text-indigo-400" />
-          Base Persona (Who are you pretending to be?)
+          Base Persona & Vibe (Your personality & tone)
         </label>
 
         <textarea
           rows={3}
           value={persona.userPersona}
           onChange={(e) => onChange({ userPersona: e.target.value })}
-          placeholder="You are me, chatting casually with my friend on Messenger. Friendly, casual tone, busy tech enthusiast..."
+          placeholder="Casual, friendly tone, chatting naturally with friends on Messenger. Authentic, warm, busy tech enthusiast..."
           className="w-full p-2.5 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
         />
       </div>

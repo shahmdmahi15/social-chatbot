@@ -117,15 +117,18 @@ export default function App() {
   };
 
   const handleUpdateSettings = async (partial: Partial<AppSettings>) => {
-    const updated: AppSettings = {
-      ...settings,
-      ...partial,
-      router: { ...settings.router, ...(partial.router || {}) },
-      persona: { ...settings.persona, ...(partial.persona || {}) },
-      safety: { ...settings.safety, ...(partial.safety || {}) },
-    };
-    setSettings(updated);
-    await saveSettings(updated);
+    let nextSettings: AppSettings;
+    setSettings((prev) => {
+      nextSettings = {
+        ...prev,
+        ...partial,
+        router: { ...prev.router, ...(partial.router || {}) },
+        persona: { ...prev.persona, ...(partial.persona || {}) },
+        safety: { ...prev.safety, ...(partial.safety || {}) },
+      };
+      return nextSettings;
+    });
+    return saveSettings(partial);
   };
 
   const handleModeChange = async (mode: BotMode) => {
@@ -257,6 +260,7 @@ export default function App() {
           <SettingsTab
             router={settings.router}
             safety={settings.safety}
+            onUpdateSettings={handleUpdateSettings}
             onUpdateRouter={(updatedRouter) =>
               handleUpdateSettings({
                 router: { ...settings.router, ...updatedRouter },

@@ -30,7 +30,7 @@ export interface ChatThread {
 }
 
 export interface PersonaConfig {
-  userPersona: string; // "Pretend you are [Name], casual, friendly, busy..."
+  userPersona: string; // "Casual, friendly, warm tone, natural chatting..."
   customInstructions: string; // Specific temporary instruction e.g. "Say I will meet him at 8 PM"
   languagePreference: ChatLanguage;
   slangStyle: 'casual_banglish' | 'standard_bangla' | 'formal_english' | 'slang_chill' | 'natural_match';

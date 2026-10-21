@@ -4,6 +4,7 @@ export interface GenerateCompletionParams {
   config: AgentRouterConfig;
   systemPrompt: string;
   messages: { role: 'user' | 'assistant'; content: string }[];
+  onFallback?: (oldModel: string, newModel: string) => void;
 }
 
 /**
@@ -43,8 +44,11 @@ function formatApiError(status: number, rawMessage: string): string {
   if (rawMessage.includes('无效的令牌') || rawMessage.includes('invalid_api_key')) {
     return 'AgentRouter API Key is invalid or expired. Please generate a new token at https://ps.air-outer.com/console/token';
   }
+  if (rawMessage.toLowerCase().includes('content-blocked') || rawMessage.toLowerCase().includes('content blocked')) {
+    return 'The model safety filter blocked this conversation turn (common with DeepSeek on affectionate or colloquial slang words). Switched to gpt-6.1-sol (OpenAI) which handles casual chatting seamlessly.';
+  }
   if (status === 503 || rawMessage.includes('无可用渠道')) {
-    return 'The selected model is temporarily offline or has no available channels on AgentRouter. Try selecting deepseek-v4-flash, gpt-6.1-sol, or gpt-6-astra.';
+    return 'The selected model is temporarily offline or has no available channels on AgentRouter. Try selecting gpt-6.1-sol or gpt-6-astra.';
   }
   return `Agent Router API error (${status}): ${rawMessage}`;
 }
@@ -53,6 +57,7 @@ export async function generateChatReply({
   config,
   systemPrompt,
   messages,
+  onFallback,
 }: GenerateCompletionParams): Promise<string> {
   if (!config.apiKey || config.apiKey.trim() === '') {
     throw new Error('Agent Router API Key is missing. Please enter your API key in the extension Side Panel settings.');
@@ -87,6 +92,33 @@ export async function generateChatReply({
     } catch {
       rawError = await response.text();
     }
+
+    const isContentBlocked =
+      rawError.toLowerCase().includes('content-blocked') ||
+      rawError.toLowerCase().includes('content blocked') ||
+      (response.status === 400 && rawError.toLowerCase().includes('blocked'));
+
+    // Automatically recover from content-blocked by failing over to a more permissive model
+    if (isContentBlocked) {
+      const currentModel = config.model || 'gpt-6.1-sol';
+      // If deepseek or another model was blocked, switch to gpt-6.1-sol; if gpt-6.1-sol was blocked, switch to gpt-6-astra
+      const fallbackModel = currentModel === 'gpt-6.1-sol' ? 'gpt-6-astra' : 'gpt-6.1-sol';
+
+      if (currentModel !== fallbackModel) {
+        console.warn(`[AgentRouter] Model ${currentModel} returned content-blocked. Automatically falling over to ${fallbackModel}...`);
+        if (onFallback) {
+          onFallback(currentModel, fallbackModel);
+        }
+        return generateChatReply({
+          config: { ...config, model: fallbackModel },
+          systemPrompt,
+          messages,
+          // Prevent infinite recursion by not chaining another fallback
+          onFallback: undefined,
+        });
+      }
+    }
+
     throw new Error(formatApiError(response.status, rawError));
   }
 
