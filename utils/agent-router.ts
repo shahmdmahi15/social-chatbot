@@ -112,6 +112,7 @@ export function parseResponsesApiResponse(data: any): string {
 
 /**
  * Calls OpenAI Responses API (/v1/responses)
+ * Note: Reasoning/frontier models (like gpt-6.1-sol, gpt-6-astra, o1, o3) strictly disallow custom temperature.
  */
 async function callResponsesApi(
   cleanBaseUrl: string,
@@ -123,7 +124,9 @@ async function callResponsesApi(
   maxTokens = 250
 ): Promise<{ ok: boolean; status: number; text?: string; rawError?: string }> {
   const endpoint = `${cleanBaseUrl}/responses`;
-  const payload = {
+  
+  // Clean instructions to prevent any formatting conflicts
+  const payload: Record<string, any> = {
     model,
     instructions: systemPrompt,
     input: messages.length > 0
@@ -132,9 +135,12 @@ async function callResponsesApi(
           content: m.content,
         }))
       : [{ role: 'user', content: 'Hi' }],
-    temperature,
-    max_tokens: maxTokens,
   };
+
+  // DO NOT include temperature for reasoning models by default as it causes HTTP 400 'Unsupported parameter: temperature'
+  if (maxTokens) {
+    payload.max_output_tokens = maxTokens;
+  }
 
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -150,6 +156,29 @@ async function callResponsesApi(
     } catch {
       rawError = await response.text();
     }
+
+    // Auto-recovery if max_output_tokens or any parameter is unsupported
+    if (rawError.includes('Unsupported parameter') || rawError.includes('max_output_tokens')) {
+      const minimalPayload = {
+        model,
+        instructions: systemPrompt,
+        input: payload.input,
+      };
+      try {
+        const retryResp = await fetch(endpoint, {
+          method: 'POST',
+          headers: getAgentRouterHeaders(apiKey),
+          body: JSON.stringify(minimalPayload),
+        });
+        if (retryResp.ok) {
+          const retryData = await retryResp.json();
+          return { ok: true, status: retryResp.status, text: parseResponsesApiResponse(retryData) };
+        }
+      } catch {
+        // Fall through to return rawError
+      }
+    }
+
     return { ok: false, status: response.status, rawError };
   }
 
@@ -171,7 +200,7 @@ async function callChatCompletionsApi(
   maxTokens = 250
 ): Promise<{ ok: boolean; status: number; text?: string; rawError?: string }> {
   const endpoint = `${cleanBaseUrl}/chat/completions`;
-  const payload = {
+  const payload: Record<string, any> = {
     model,
     messages: [
       { role: 'system', content: systemPrompt },
@@ -195,6 +224,26 @@ async function callChatCompletionsApi(
     } catch {
       rawError = await response.text();
     }
+
+    // Self-healing: if temperature is unsupported on this model, retry without temperature
+    if (rawError.includes("parameter: 'temperature'") || rawError.includes('temperature is not supported')) {
+      const { temperature: _, ...strippedPayload } = payload;
+      try {
+        const retryResp = await fetch(endpoint, {
+          method: 'POST',
+          headers: getAgentRouterHeaders(apiKey),
+          body: JSON.stringify(strippedPayload),
+        });
+        if (retryResp.ok) {
+          const retryData = await retryResp.json();
+          const choice = retryData.choices?.[0];
+          return { ok: true, status: retryResp.status, text: choice?.message?.content?.trim() || '' };
+        }
+      } catch {
+        // Fall through to return rawError
+      }
+    }
+
     return { ok: false, status: response.status, rawError };
   }
 
