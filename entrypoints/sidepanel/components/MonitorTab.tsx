@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Search,
   MessageSquare,
+  Zap,
 } from 'lucide-react';
 
 interface Props {

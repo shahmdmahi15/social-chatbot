@@ -14,7 +14,8 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "types": ["chrome"]
   },
   "include": ["entrypoints/**/*", "components/**/*", "utils/**/*", "types/**/*", ".wxt/wxt.d.ts"]
 }

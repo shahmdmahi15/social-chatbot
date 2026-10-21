@@ -43,7 +43,8 @@ export async function simulateHumanTyping(
 
   // 3. Type character-by-character to trigger Facebook's typing indicators
   for (let i = 0; i < text.length; i++) {
-    const char = text[i];
+    const char = text[i] || '';
+    if (!char) continue;
     
     // Use document.execCommand to update Lexical state correctly
     const success = document.execCommand('insertText', false, char);

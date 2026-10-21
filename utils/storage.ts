@@ -153,8 +153,9 @@ export function isContextValid(): boolean {
 if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
   try {
     chrome.storage.onChanged.addListener((changes, areaName) => {
-      if (areaName === 'local' && changes[STORAGE_KEYS.SETTINGS]?.newValue) {
-        cachedSettings = changes[STORAGE_KEYS.SETTINGS].newValue;
+      const settingChange = changes[STORAGE_KEYS.SETTINGS];
+      if (areaName === 'local' && settingChange?.newValue) {
+        cachedSettings = settingChange.newValue as AppSettings;
       }
     });
   } catch {
@@ -321,7 +322,7 @@ export function saveSettings(partial: Partial<AppSettings>): Promise<AppSettings
 
 export async function getLogs(): Promise<ActivityLog[]> {
   const result = await chrome.storage.local.get(STORAGE_KEYS.LOGS);
-  return result[STORAGE_KEYS.LOGS] || [];
+  return (result[STORAGE_KEYS.LOGS] as ActivityLog[]) || [];
 }
 
 export async function addLog(log: Omit<ActivityLog, 'id' | 'timestamp'>): Promise<ActivityLog> {
@@ -342,7 +343,7 @@ export async function clearLogs(): Promise<void> {
 
 export async function getCurrentThread(): Promise<ChatThread | null> {
   const result = await chrome.storage.local.get(STORAGE_KEYS.CURRENT_THREAD);
-  return result[STORAGE_KEYS.CURRENT_THREAD] || null;
+  return (result[STORAGE_KEYS.CURRENT_THREAD] as ChatThread) || null;
 }
 
 export async function setCurrentThread(thread: ChatThread | null): Promise<void> {
@@ -351,7 +352,7 @@ export async function setCurrentThread(thread: ChatThread | null): Promise<void>
 
 export async function getBotStatus(): Promise<BotStatus> {
   const result = await chrome.storage.local.get(STORAGE_KEYS.BOT_STATUS);
-  return result[STORAGE_KEYS.BOT_STATUS] || 'idle';
+  return (result[STORAGE_KEYS.BOT_STATUS] as BotStatus) || 'idle';
 }
 
 export async function setBotStatus(status: BotStatus): Promise<void> {
@@ -360,7 +361,7 @@ export async function setBotStatus(status: BotStatus): Promise<void> {
 
 export async function getPendingDraft(): Promise<{ threadId: string; text: string; threadName: string } | null> {
   const result = await chrome.storage.local.get(STORAGE_KEYS.PENDING_DRAFT);
-  return result[STORAGE_KEYS.PENDING_DRAFT] || null;
+  return (result[STORAGE_KEYS.PENDING_DRAFT] as { threadId: string; text: string; threadName: string }) || null;
 }
 
 export async function setPendingDraft(draft: { threadId: string; text: string; threadName: string } | null): Promise<void> {
@@ -371,7 +372,7 @@ export async function getDiscoveredContacts(): Promise<DiscoveredContact[]> {
   if (!isContextValid()) return [];
   try {
     const result = await chrome.storage.local.get(STORAGE_KEYS.CONTACTS);
-    return result[STORAGE_KEYS.CONTACTS] || [];
+    return (result[STORAGE_KEYS.CONTACTS] as DiscoveredContact[]) || [];
   } catch {
     return [];
   }

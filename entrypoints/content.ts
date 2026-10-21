@@ -51,6 +51,7 @@ export default defineContentScript({
         if (messages.length === 0) return;
 
         const latest = messages[messages.length - 1];
+        if (!latest) return;
 
         // Only trigger if the latest message is from the other person ('them')
         // and it's different from the last seen text
@@ -92,8 +93,9 @@ export default defineContentScript({
         if (activeThread.id !== currentThreadId) {
           currentThreadId = activeThread.id;
           const messages = extractRecentMessages(10);
-          if (messages.length > 0) {
-            lastSeenMessageText = messages[messages.length - 1].text;
+          const lastMsg = messages.length > 0 ? messages[messages.length - 1] : undefined;
+          if (lastMsg) {
+            lastSeenMessageText = lastMsg.text;
           }
 
           await safeSendMessage({

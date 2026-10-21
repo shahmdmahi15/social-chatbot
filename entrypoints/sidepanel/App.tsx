@@ -65,23 +65,29 @@ export default function App() {
 
     // Listen for storage changes in real-time
     const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }) => {
-      if (changes.social_chatbot_settings) {
-        setSettings(changes.social_chatbot_settings.newValue);
+      if (changes.social_chatbot_settings?.newValue) {
+        setSettings(changes.social_chatbot_settings.newValue as AppSettings);
       }
-      if (changes.social_chatbot_bot_status) {
-        setStatus(changes.social_chatbot_bot_status.newValue);
+      if (changes.social_chatbot_bot_status?.newValue) {
+        setStatus(changes.social_chatbot_bot_status.newValue as BotStatus);
       }
       if (changes.social_chatbot_current_thread) {
-        setCurrentThreadState(changes.social_chatbot_current_thread.newValue);
+        setCurrentThreadState((changes.social_chatbot_current_thread.newValue as ChatThread) || null);
       }
       if (changes.social_chatbot_contacts) {
-        setDiscoveredContacts(changes.social_chatbot_contacts.newValue || []);
+        setDiscoveredContacts((changes.social_chatbot_contacts.newValue as DiscoveredContact[]) || []);
       }
       if (changes.social_chatbot_pending_draft) {
-        setPendingDraftState(changes.social_chatbot_pending_draft.newValue);
+        setPendingDraftState(
+          (changes.social_chatbot_pending_draft.newValue as {
+            threadId: string;
+            text: string;
+            threadName: string;
+          }) || null
+        );
       }
-      if (changes.social_chatbot_logs) {
-        setLogs(changes.social_chatbot_logs.newValue);
+      if (changes.social_chatbot_logs?.newValue) {
+        setLogs((changes.social_chatbot_logs.newValue as ActivityLog[]) || []);
       }
     };
 

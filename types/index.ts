@@ -71,7 +71,7 @@ export interface SafetySettings {
 export interface ActivityLog {
   id: string;
   timestamp: number;
-  type: 'incoming' | 'coalescing' | 'thinking' | 'generated' | 'sent' | 'error' | 'approval_required';
+  type: 'incoming' | 'coalescing' | 'thinking' | 'typing' | 'generated' | 'sent' | 'error' | 'approval_required';
   threadName: string;
   message: string;
   metadata?: any;

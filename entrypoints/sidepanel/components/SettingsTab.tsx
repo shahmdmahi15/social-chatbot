@@ -186,7 +186,7 @@ export const SettingsTab: React.FC<Props> = ({
   const [showCustomModelInput, setShowCustomModelInput] = useState(false);
 
   // Active provider metadata
-  const currentMeta = PROVIDER_METAS.find((m) => m.id === activeProvider) || PROVIDER_METAS[0];
+  const currentMeta: ProviderMeta = PROVIDER_METAS.find((m) => m.id === activeProvider) ?? PROVIDER_METAS[0]!;
 
   // Helper to update current provider configuration
   const handleUpdateActiveProviderConfig = (updates: Partial<ProviderConfig>) => {
