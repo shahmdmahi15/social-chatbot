@@ -68,6 +68,25 @@ export const Header: React.FC<Props> = ({ status, botMode, onModeChange, onTrigg
         </button>
       </div>
 
+      {/* Mode explainer banner */}
+      <div className="text-[10px] text-center font-medium">
+        {botMode === 'autopilot' && (
+          <span className="text-cyan-400 flex items-center justify-center gap-1">
+            <Zap className="w-3 h-3 animate-pulse" /> Auto-Pilot Active: AI types & sends replies automatically
+          </span>
+        )}
+        {botMode === 'manual_approval' && (
+          <span className="text-amber-300 flex items-center justify-center gap-1">
+            <ShieldCheck className="w-3 h-3" /> Review First Active: Drafts are prepared for your review
+          </span>
+        )}
+        {botMode === 'disabled' && (
+          <span className="text-rose-400 flex items-center justify-center gap-1">
+            <PowerOff className="w-3 h-3" /> Bot is turned Off
+          </span>
+        )}
+      </div>
+
       {/* Quick Instant Reply Button if bot is enabled */}
       {botMode !== 'disabled' && onTriggerReplyNow && (
         <button

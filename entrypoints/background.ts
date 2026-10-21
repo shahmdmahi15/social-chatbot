@@ -183,11 +183,11 @@ export default defineBackground(() => {
         config: settings.router,
         systemPrompt,
         messages: formattedHistory,
-        onFallback: async (oldModel, newModel) => {
+        onFallback: async (oldModel, newModel, reason) => {
           await addLog({
             type: 'coalescing',
             threadName: thread.name,
-            message: `⚠️ Safety filter triggered on ${oldModel}. Automatically switched to ${newModel} for seamless chatting!`,
+            message: `⚠️ ${oldModel} failed${reason ? ` (${reason})` : ''}. Auto-switching to ${newModel}...`,
           });
         },
       });

@@ -81,17 +81,31 @@ export function formatChatHistoryForLLM(messages: ChatMessage[]): { role: 'user'
   const formattedTurns: { role: 'user' | 'assistant'; content: string }[] = [];
 
   for (const msg of messages) {
-    if (msg.sender === 'them') {
-      formattedTurns.push({
-        role: 'user',
-        content: msg.text,
-      });
+    const text = (msg.text || '').trim();
+    if (!text) continue;
+
+    const role: 'user' | 'assistant' = msg.sender === 'them' ? 'user' : 'assistant';
+
+    // If consecutive messages have the same role, coalesce them with a newline
+    // Many strict LLM providers (Anthropic, Responses API) disallow consecutive same-role turns
+    if (formattedTurns.length > 0 && formattedTurns[formattedTurns.length - 1].role === role) {
+      formattedTurns[formattedTurns.length - 1].content += `\n${text}`;
     } else {
-      formattedTurns.push({
-        role: 'assistant',
-        content: msg.text,
-      });
+      formattedTurns.push({ role, content: text });
     }
+  }
+
+  // Ensure conversation does not end on an assistant turn (many models reject finishing on assistant turn)
+  if (formattedTurns.length > 0 && formattedTurns[formattedTurns.length - 1].role === 'assistant') {
+    formattedTurns.push({
+      role: 'user',
+      content: 'Please reply naturally and keep the conversation going.',
+    });
+  }
+
+  // Fallback if no text extracted
+  if (formattedTurns.length === 0) {
+    formattedTurns.push({ role: 'user', content: 'Hi' });
   }
 
   return formattedTurns;

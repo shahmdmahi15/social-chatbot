@@ -4,8 +4,16 @@ export interface GenerateCompletionParams {
   config: AgentRouterConfig;
   systemPrompt: string;
   messages: { role: 'user' | 'assistant'; content: string }[];
-  onFallback?: (oldModel: string, newModel: string) => void;
+  onFallback?: (oldModel: string, newModel: string, reason?: string) => void;
 }
+
+const FALLBACK_CANDIDATES = [
+  'gpt-6.1-sol',
+  'gpt-6-astra',
+  'claude-opus-5',
+  'deepseek-v4-flash',
+  'glm-5.3',
+];
 
 /**
  * Normalizes AgentRouter URL to ensure it points to the correct /v1 endpoint
@@ -74,37 +82,48 @@ export function isResponsesModel(model: string): boolean {
  */
 export function parseResponsesApiResponse(data: any): string {
   if (!data) return '';
+  if (typeof data === 'string') return data.trim();
   if (typeof data.output === 'string') return data.output.trim();
   if (typeof data.text === 'string') return data.text.trim();
   if (typeof data.output_text === 'string') return data.output_text.trim();
+  if (typeof data.content === 'string') return data.content.trim();
 
   if (Array.isArray(data.output)) {
     for (const item of data.output) {
       if (!item) continue;
-      // Structured message item
-      if (item.type === 'message' && Array.isArray(item.content)) {
-        for (const part of item.content) {
-          if (part && typeof part.text === 'string' && part.text.trim()) {
-            return part.text.trim();
-          }
-        }
-      }
+      if (typeof item === 'string') return item.trim();
+      if (typeof item.text === 'string' && item.text.trim()) return item.text.trim();
+      if (typeof item.content === 'string' && item.content.trim()) return item.content.trim();
+
       if (Array.isArray(item.content)) {
         for (const part of item.content) {
-          if (part && typeof part.text === 'string' && part.text.trim()) {
-            return part.text.trim();
-          }
+          if (!part) continue;
+          if (typeof part === 'string' && part.trim()) return part.trim();
+          if (typeof part.text === 'string' && part.text.trim()) return part.text.trim();
         }
       }
-      if (typeof item.text === 'string' && item.text.trim()) {
-        return item.text.trim();
+    }
+  }
+
+  if (data.output && typeof data.output === 'object') {
+    if (typeof data.output.text === 'string') return data.output.text.trim();
+    if (typeof data.output.content === 'string') return data.output.content.trim();
+    if (Array.isArray(data.output.content)) {
+      for (const part of data.output.content) {
+        if (part && typeof part.text === 'string' && part.text.trim()) return part.text.trim();
       }
     }
   }
 
   // Fallback if gateway returns standard choices format
   if (data.choices?.[0]?.message?.content) {
-    return data.choices[0].message.content.trim();
+    const c = data.choices[0].message.content;
+    if (typeof c === 'string') return c.trim();
+    if (Array.isArray(c)) {
+      for (const p of c) {
+        if (p?.text) return p.text.trim();
+      }
+    }
   }
 
   return '';
@@ -112,7 +131,7 @@ export function parseResponsesApiResponse(data: any): string {
 
 /**
  * Calls OpenAI Responses API (/v1/responses)
- * Note: Reasoning/frontier models (like gpt-6.1-sol, gpt-6-astra, o1, o3) strictly disallow custom temperature.
+ * Note: Reasoning/frontier models strictly disallow custom temperature.
  */
 async function callResponsesApi(
   cleanBaseUrl: string,
@@ -124,8 +143,9 @@ async function callResponsesApi(
   maxTokens = 250
 ): Promise<{ ok: boolean; status: number; text?: string; rawError?: string }> {
   const endpoint = `${cleanBaseUrl}/responses`;
-  
-  // Clean instructions to prevent any formatting conflicts
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
+
   const payload: Record<string, any> = {
     model,
     instructions: systemPrompt,
@@ -137,54 +157,62 @@ async function callResponsesApi(
       : [{ role: 'user', content: 'Hi' }],
   };
 
-  // DO NOT include temperature for reasoning models by default as it causes HTTP 400 'Unsupported parameter: temperature'
+  // DO NOT include temperature for reasoning models by default
   if (maxTokens) {
     payload.max_output_tokens = maxTokens;
   }
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: getAgentRouterHeaders(apiKey),
-    body: JSON.stringify(payload),
-  });
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: getAgentRouterHeaders(apiKey),
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
 
-  if (!response.ok) {
-    let rawError = '';
-    try {
-      const errorJson = await response.json();
-      rawError = errorJson.error?.message || errorJson.message || JSON.stringify(errorJson);
-    } catch {
-      rawError = await response.text();
-    }
-
-    // Auto-recovery if max_output_tokens or any parameter is unsupported
-    if (rawError.includes('Unsupported parameter') || rawError.includes('max_output_tokens')) {
-      const minimalPayload = {
-        model,
-        instructions: systemPrompt,
-        input: payload.input,
-      };
+    if (!response.ok) {
+      let rawError = '';
       try {
-        const retryResp = await fetch(endpoint, {
-          method: 'POST',
-          headers: getAgentRouterHeaders(apiKey),
-          body: JSON.stringify(minimalPayload),
-        });
-        if (retryResp.ok) {
-          const retryData = await retryResp.json();
-          return { ok: true, status: retryResp.status, text: parseResponsesApiResponse(retryData) };
-        }
+        const errorJson = await response.json();
+        rawError = errorJson.error?.message || errorJson.message || JSON.stringify(errorJson);
       } catch {
-        // Fall through to return rawError
+        rawError = await response.text();
       }
+
+      // Auto-recovery if max_output_tokens is unsupported
+      if (rawError.includes('Unsupported parameter') || rawError.includes('max_output_tokens')) {
+        const minimalPayload = {
+          model,
+          instructions: systemPrompt,
+          input: payload.input,
+        };
+        try {
+          const retryResp = await fetch(endpoint, {
+            method: 'POST',
+            headers: getAgentRouterHeaders(apiKey),
+            body: JSON.stringify(minimalPayload),
+          });
+          if (retryResp.ok) {
+            const retryData = await retryResp.json();
+            return { ok: true, status: retryResp.status, text: parseResponsesApiResponse(retryData) };
+          }
+        } catch {
+          // Fall through
+        }
+      }
+
+      return { ok: false, status: response.status, rawError };
     }
 
-    return { ok: false, status: response.status, rawError };
+    const data = await response.json();
+    const replyText = parseResponsesApiResponse(data);
+    return { ok: true, status: response.status, text: replyText };
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    const msg = err.name === 'AbortError' ? 'Request timed out after 25s' : err.message;
+    return { ok: false, status: 504, rawError: msg };
   }
-
-  const data = await response.json();
-  const replyText = parseResponsesApiResponse(data);
-  return { ok: true, status: response.status, text: replyText };
 }
 
 /**
@@ -200,65 +228,75 @@ async function callChatCompletionsApi(
   maxTokens = 250
 ): Promise<{ ok: boolean; status: number; text?: string; rawError?: string }> {
   const endpoint = `${cleanBaseUrl}/chat/completions`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
+
   const payload: Record<string, any> = {
     model,
     messages: [
       { role: 'system', content: systemPrompt },
       ...messages,
     ],
-    temperature,
     max_tokens: maxTokens,
   };
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: getAgentRouterHeaders(apiKey),
-    body: JSON.stringify(payload),
-  });
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: getAgentRouterHeaders(apiKey),
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
 
-  if (!response.ok) {
-    let rawError = '';
-    try {
-      const errorJson = await response.json();
-      rawError = errorJson.error?.message || errorJson.message || JSON.stringify(errorJson);
-    } catch {
-      rawError = await response.text();
-    }
-
-    // Self-healing: if temperature is unsupported on this model, retry without temperature
-    if (rawError.includes("parameter: 'temperature'") || rawError.includes('temperature is not supported')) {
-      const { temperature: _, ...strippedPayload } = payload;
+    if (!response.ok) {
+      let rawError = '';
       try {
-        const retryResp = await fetch(endpoint, {
-          method: 'POST',
-          headers: getAgentRouterHeaders(apiKey),
-          body: JSON.stringify(strippedPayload),
-        });
-        if (retryResp.ok) {
-          const retryData = await retryResp.json();
-          const choice = retryData.choices?.[0];
-          return { ok: true, status: retryResp.status, text: choice?.message?.content?.trim() || '' };
-        }
+        const errorJson = await response.json();
+        rawError = errorJson.error?.message || errorJson.message || JSON.stringify(errorJson);
       } catch {
-        // Fall through to return rawError
+        rawError = await response.text();
       }
+
+      // Self-healing: if temperature or another parameter is unsupported
+      if (rawError.includes("parameter: 'temperature'") || rawError.includes('temperature is not supported')) {
+        const { temperature: _, ...strippedPayload } = payload;
+        try {
+          const retryResp = await fetch(endpoint, {
+            method: 'POST',
+            headers: getAgentRouterHeaders(apiKey),
+            body: JSON.stringify(strippedPayload),
+          });
+          if (retryResp.ok) {
+            const retryData = await retryResp.json();
+            const choice = retryData.choices?.[0];
+            return { ok: true, status: retryResp.status, text: choice?.message?.content?.trim() || '' };
+          }
+        } catch {
+          // Fall through
+        }
+      }
+
+      return { ok: false, status: response.status, rawError };
     }
 
-    return { ok: false, status: response.status, rawError };
+    const data = await response.json();
+    const choice = data.choices?.[0];
+    const replyText = choice?.message?.content ? choice.message.content.trim() : '';
+    return { ok: true, status: response.status, text: replyText };
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    const msg = err.name === 'AbortError' ? 'Request timed out after 25s' : err.message;
+    return { ok: false, status: 504, rawError: msg };
   }
-
-  const data = await response.json();
-  const choice = data.choices?.[0];
-  const replyText = choice?.message?.content ? choice.message.content.trim() : '';
-  return { ok: true, status: response.status, text: replyText };
 }
 
-export async function generateChatReply({
-  config,
-  systemPrompt,
-  messages,
-  onFallback,
-}: GenerateCompletionParams): Promise<string> {
+export async function generateChatReply(
+  params: GenerateCompletionParams,
+  triedModels: Set<string> = new Set()
+): Promise<string> {
+  const { config, systemPrompt, messages, onFallback } = params;
+
   if (!config.apiKey || config.apiKey.trim() === '') {
     throw new Error('Agent Router API Key is missing. Please enter your API key in the extension Side Panel settings.');
   }
@@ -267,6 +305,9 @@ export async function generateChatReply({
   const currentModel = config.model || 'gpt-6.1-sol';
   const temperature = config.temperature ?? 0.7;
   const maxTokens = config.maxTokens ?? 250;
+
+  // Track tried models to prevent infinite loops
+  triedModels.add(currentModel);
 
   // 1. Determine preferred protocol based on model name
   const preferResponses = isResponsesModel(currentModel);
@@ -280,7 +321,6 @@ export async function generateChatReply({
   if (!result.ok && result.rawError) {
     const errorLower = result.rawError.toLowerCase();
 
-    // If chat completions said: "does not support /v1/chat/completions, please use /v1/responses instead"
     if (errorLower.includes('/v1/responses') || errorLower.includes('responses api') || result.rawError.includes('请改用 /v1/responses')) {
       console.log(`[AgentRouter] Auto-switching ${currentModel} to /v1/responses...`);
       result = await callResponsesApi(cleanBaseUrl, config.apiKey, currentModel, systemPrompt, messages, temperature, maxTokens);
@@ -290,34 +330,39 @@ export async function generateChatReply({
     }
   }
 
-  // 3. Sensitive Words / Content-Blocked Auto-Failover:
+  // 3. Sensitive Words / Content-Blocked / Timeout Auto-Failover:
   if (!result.ok && result.rawError) {
     const rawLower = result.rawError.toLowerCase();
-    const isSafetyBlocked =
+    const shouldFailover =
       rawLower.includes('content-blocked') ||
       rawLower.includes('content blocked') ||
       rawLower.includes('sensitive words') ||
       rawLower.includes('sensitive_words') ||
       rawLower.includes('敏感词') ||
-      (result.status === 500 && rawLower.includes('sensitive')) ||
-      (result.status === 400 && rawLower.includes('blocked'));
+      rawLower.includes('unsupported parameter') ||
+      result.status === 500 ||
+      result.status === 503 ||
+      result.status === 504 ||
+      rawLower.includes('timeout') ||
+      rawLower.includes('timed out');
 
-    if (isSafetyBlocked) {
-      // Failover to gpt-6.1-sol (or gpt-6-astra if already on gpt-6.1-sol)
-      const fallbackModel = currentModel === 'gpt-6.1-sol' ? 'gpt-6-astra' : 'gpt-6.1-sol';
+    if (shouldFailover) {
+      // Find the next model candidate that hasn't been tried yet
+      const fallbackModel = FALLBACK_CANDIDATES.find((m) => !triedModels.has(m) && m !== currentModel);
 
-      if (currentModel !== fallbackModel) {
-        console.warn(`[AgentRouter] Filter triggered on ${currentModel}. Automatically falling over to ${fallbackModel}...`);
+      if (fallbackModel) {
+        const shortReason = result.rawError.length > 70 ? `${result.rawError.slice(0, 67)}...` : result.rawError;
+        console.warn(`[AgentRouter] ${currentModel} failed: ${shortReason}. Auto-failing over to ${fallbackModel}...`);
         if (onFallback) {
-          onFallback(currentModel, fallbackModel);
+          onFallback(currentModel, fallbackModel, shortReason);
         }
-        return generateChatReply({
-          config: { ...config, model: fallbackModel },
-          systemPrompt,
-          messages,
-          // Prevent infinite recursion
-          onFallback: undefined,
-        });
+        return generateChatReply(
+          {
+            ...params,
+            config: { ...config, model: fallbackModel },
+          },
+          triedModels
+        );
       }
     }
 
