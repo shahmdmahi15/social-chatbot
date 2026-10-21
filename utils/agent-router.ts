@@ -44,13 +44,164 @@ function formatApiError(status: number, rawMessage: string): string {
   if (rawMessage.includes('无效的令牌') || rawMessage.includes('invalid_api_key')) {
     return 'AgentRouter API Key is invalid or expired. Please generate a new token at https://ps.air-outer.com/console/token';
   }
+  if (rawMessage.toLowerCase().includes('sensitive words') || rawMessage.toLowerCase().includes('sensitive_words') || rawMessage.includes('敏感词')) {
+    return 'Sensitive words filter triggered on the selected model (common with DeepSeek on affectionate or colloquial slang words). Switched to gpt-6.1-sol via OpenAI Responses API.';
+  }
   if (rawMessage.toLowerCase().includes('content-blocked') || rawMessage.toLowerCase().includes('content blocked')) {
-    return 'The model safety filter blocked this conversation turn (common with DeepSeek on affectionate or colloquial slang words). Switched to gpt-6.1-sol (OpenAI) which handles casual chatting seamlessly.';
+    return 'The model safety filter blocked this conversation turn. Switched automatically to gpt-6.1-sol via OpenAI Responses API.';
   }
   if (status === 503 || rawMessage.includes('无可用渠道')) {
     return 'The selected model is temporarily offline or has no available channels on AgentRouter. Try selecting gpt-6.1-sol or gpt-6-astra.';
   }
   return `Agent Router API error (${status}): ${rawMessage}`;
+}
+
+/**
+ * Checks whether a given model requires the OpenAI Responses API (/v1/responses)
+ */
+export function isResponsesModel(model: string): boolean {
+  const m = (model || '').toLowerCase();
+  return (
+    m.includes('gpt-6') ||
+    m.includes('sol') ||
+    m.includes('astra') ||
+    m.includes('responses')
+  );
+}
+
+/**
+ * Parses the response from OpenAI Responses API (/v1/responses)
+ */
+export function parseResponsesApiResponse(data: any): string {
+  if (!data) return '';
+  if (typeof data.output === 'string') return data.output.trim();
+  if (typeof data.text === 'string') return data.text.trim();
+  if (typeof data.output_text === 'string') return data.output_text.trim();
+
+  if (Array.isArray(data.output)) {
+    for (const item of data.output) {
+      if (!item) continue;
+      // Structured message item
+      if (item.type === 'message' && Array.isArray(item.content)) {
+        for (const part of item.content) {
+          if (part && typeof part.text === 'string' && part.text.trim()) {
+            return part.text.trim();
+          }
+        }
+      }
+      if (Array.isArray(item.content)) {
+        for (const part of item.content) {
+          if (part && typeof part.text === 'string' && part.text.trim()) {
+            return part.text.trim();
+          }
+        }
+      }
+      if (typeof item.text === 'string' && item.text.trim()) {
+        return item.text.trim();
+      }
+    }
+  }
+
+  // Fallback if gateway returns standard choices format
+  if (data.choices?.[0]?.message?.content) {
+    return data.choices[0].message.content.trim();
+  }
+
+  return '';
+}
+
+/**
+ * Calls OpenAI Responses API (/v1/responses)
+ */
+async function callResponsesApi(
+  cleanBaseUrl: string,
+  apiKey: string,
+  model: string,
+  systemPrompt: string,
+  messages: { role: 'user' | 'assistant'; content: string }[],
+  temperature = 0.7,
+  maxTokens = 250
+): Promise<{ ok: boolean; status: number; text?: string; rawError?: string }> {
+  const endpoint = `${cleanBaseUrl}/responses`;
+  const payload = {
+    model,
+    instructions: systemPrompt,
+    input: messages.length > 0
+      ? messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        }))
+      : [{ role: 'user', content: 'Hi' }],
+    temperature,
+    max_tokens: maxTokens,
+  };
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: getAgentRouterHeaders(apiKey),
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    let rawError = '';
+    try {
+      const errorJson = await response.json();
+      rawError = errorJson.error?.message || errorJson.message || JSON.stringify(errorJson);
+    } catch {
+      rawError = await response.text();
+    }
+    return { ok: false, status: response.status, rawError };
+  }
+
+  const data = await response.json();
+  const replyText = parseResponsesApiResponse(data);
+  return { ok: true, status: response.status, text: replyText };
+}
+
+/**
+ * Calls standard Chat Completions API (/v1/chat/completions)
+ */
+async function callChatCompletionsApi(
+  cleanBaseUrl: string,
+  apiKey: string,
+  model: string,
+  systemPrompt: string,
+  messages: { role: 'user' | 'assistant'; content: string }[],
+  temperature = 0.7,
+  maxTokens = 250
+): Promise<{ ok: boolean; status: number; text?: string; rawError?: string }> {
+  const endpoint = `${cleanBaseUrl}/chat/completions`;
+  const payload = {
+    model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      ...messages,
+    ],
+    temperature,
+    max_tokens: maxTokens,
+  };
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: getAgentRouterHeaders(apiKey),
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    let rawError = '';
+    try {
+      const errorJson = await response.json();
+      rawError = errorJson.error?.message || errorJson.message || JSON.stringify(errorJson);
+    } catch {
+      rawError = await response.text();
+    }
+    return { ok: false, status: response.status, rawError };
+  }
+
+  const data = await response.json();
+  const choice = data.choices?.[0];
+  const replyText = choice?.message?.content ? choice.message.content.trim() : '';
+  return { ok: true, status: response.status, text: replyText };
 }
 
 export async function generateChatReply({
@@ -64,48 +215,50 @@ export async function generateChatReply({
   }
 
   const cleanBaseUrl = normalizeBaseUrl(config.baseUrl);
-  const endpoint = cleanBaseUrl.endsWith('/chat/completions')
-    ? cleanBaseUrl
-    : `${cleanBaseUrl}/chat/completions`;
+  const currentModel = config.model || 'gpt-6.1-sol';
+  const temperature = config.temperature ?? 0.7;
+  const maxTokens = config.maxTokens ?? 250;
 
-  const payload = {
-    model: config.model || 'gpt-6.1-sol',
-    messages: [
-      { role: 'system', content: systemPrompt },
-      ...messages,
-    ],
-    temperature: config.temperature ?? 0.7,
-    max_tokens: config.maxTokens ?? 250,
-  };
+  // 1. Determine preferred protocol based on model name
+  const preferResponses = isResponsesModel(currentModel);
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: getAgentRouterHeaders(config.apiKey),
-    body: JSON.stringify(payload),
-  });
+  let result = preferResponses
+    ? await callResponsesApi(cleanBaseUrl, config.apiKey, currentModel, systemPrompt, messages, temperature, maxTokens)
+    : await callChatCompletionsApi(cleanBaseUrl, config.apiKey, currentModel, systemPrompt, messages, temperature, maxTokens);
 
-  if (!response.ok) {
-    let rawError = '';
-    try {
-      const errorJson = await response.json();
-      rawError = errorJson.error?.message || errorJson.message || JSON.stringify(errorJson);
-    } catch {
-      rawError = await response.text();
+  // 2. Intelligent Protocol Auto-Switching:
+  // If endpoint explicitly advises using the other endpoint
+  if (!result.ok && result.rawError) {
+    const errorLower = result.rawError.toLowerCase();
+
+    // If chat completions said: "does not support /v1/chat/completions, please use /v1/responses instead"
+    if (errorLower.includes('/v1/responses') || errorLower.includes('responses api') || result.rawError.includes('请改用 /v1/responses')) {
+      console.log(`[AgentRouter] Auto-switching ${currentModel} to /v1/responses...`);
+      result = await callResponsesApi(cleanBaseUrl, config.apiKey, currentModel, systemPrompt, messages, temperature, maxTokens);
+    } else if (errorLower.includes('/v1/chat/completions') || errorLower.includes('chat completions')) {
+      console.log(`[AgentRouter] Auto-switching ${currentModel} to /v1/chat/completions...`);
+      result = await callChatCompletionsApi(cleanBaseUrl, config.apiKey, currentModel, systemPrompt, messages, temperature, maxTokens);
     }
+  }
 
-    const isContentBlocked =
-      rawError.toLowerCase().includes('content-blocked') ||
-      rawError.toLowerCase().includes('content blocked') ||
-      (response.status === 400 && rawError.toLowerCase().includes('blocked'));
+  // 3. Sensitive Words / Content-Blocked Auto-Failover:
+  if (!result.ok && result.rawError) {
+    const rawLower = result.rawError.toLowerCase();
+    const isSafetyBlocked =
+      rawLower.includes('content-blocked') ||
+      rawLower.includes('content blocked') ||
+      rawLower.includes('sensitive words') ||
+      rawLower.includes('sensitive_words') ||
+      rawLower.includes('敏感词') ||
+      (result.status === 500 && rawLower.includes('sensitive')) ||
+      (result.status === 400 && rawLower.includes('blocked'));
 
-    // Automatically recover from content-blocked by failing over to a more permissive model
-    if (isContentBlocked) {
-      const currentModel = config.model || 'gpt-6.1-sol';
-      // If deepseek or another model was blocked, switch to gpt-6.1-sol; if gpt-6.1-sol was blocked, switch to gpt-6-astra
+    if (isSafetyBlocked) {
+      // Failover to gpt-6.1-sol (or gpt-6-astra if already on gpt-6.1-sol)
       const fallbackModel = currentModel === 'gpt-6.1-sol' ? 'gpt-6-astra' : 'gpt-6.1-sol';
 
       if (currentModel !== fallbackModel) {
-        console.warn(`[AgentRouter] Model ${currentModel} returned content-blocked. Automatically falling over to ${fallbackModel}...`);
+        console.warn(`[AgentRouter] Filter triggered on ${currentModel}. Automatically falling over to ${fallbackModel}...`);
         if (onFallback) {
           onFallback(currentModel, fallbackModel);
         }
@@ -113,23 +266,20 @@ export async function generateChatReply({
           config: { ...config, model: fallbackModel },
           systemPrompt,
           messages,
-          // Prevent infinite recursion by not chaining another fallback
+          // Prevent infinite recursion
           onFallback: undefined,
         });
       }
     }
 
-    throw new Error(formatApiError(response.status, rawError));
+    throw new Error(formatApiError(result.status, result.rawError));
   }
 
-  const data = await response.json();
-  const choice = data.choices?.[0];
-
-  if (!choice || !choice.message?.content) {
+  if (!result.text) {
     throw new Error('Empty or invalid completion returned by Agent Router.');
   }
 
-  let replyText = choice.message.content.trim();
+  let replyText = result.text.trim();
   replyText = replyText.replace(/^["']|["']$/g, '');
 
   return replyText;

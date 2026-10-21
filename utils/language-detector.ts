@@ -4,7 +4,7 @@ import type { ChatLanguage } from '../types';
 const BANGLISH_KEYWORDS = new Set([
   'kemon', 'acho', 'aso', 'achen', 'ki', 'khobor', 'obstha', 'obostha',
   'bhai', 'bro', 'dost', 'mama', 'apu', 'vai', 'vaiya',
-  'kothay', 'kothaye', 'kobe', 'keno', 'kemne', 'kivabe',
+  'kothay', 'kothaye', 'kobe', 'keno', 'kemne', 'kivabe', 'kno', 'knoo',
   'ami', 'tumi', 'tui', 'apni', 'amra', 'tomra', 'oder', 'amader', 'tomader',
   'achi', 'asi', 'aso', 'achen', 'chilam', 'thakbo', 'thako',
   'korchi', 'korsi', 'korbo', 'koro', 'koren', 'korlam',
@@ -12,7 +12,8 @@ const BANGLISH_KEYWORDS = new Set([
   'ha', 'haa', 'na', 'naa', 'thik', 'accha', 'achha', 'acha',
   'valoi', 'valo', 'bhalo', 'kharap', 'shun', 'shono', 'bolo', 'boltechi',
   'ekhon', 'ekhn', 'pore', 'ajke', 'kalke', 'shokal', 'raat', 'shondha',
-  'dekha', 'hobe', 'hoise', 'hoiche', 'hoyeche', 'hoyni', 'parbo', 'parbona'
+  'dekha', 'hobe', 'hoise', 'hoiche', 'hoyeche', 'hoyni', 'parbo', 'parbona',
+  'jan', 'jaan', 'valobashi', 'valobasho', 'valobasbe', 'ailabiu', 'babu', 'priyo', 'mon', 'shona', 'kew'
 ]);
 
 export function detectLanguage(text: string): ChatLanguage {

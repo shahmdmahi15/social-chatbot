@@ -50,48 +50,70 @@ const STORAGE_KEYS = {
 let cachedSettings: AppSettings | null = null;
 let savePromiseChain: Promise<AppSettings> = Promise.resolve(DEFAULT_SETTINGS);
 
+export function isContextValid(): boolean {
+  return typeof chrome !== 'undefined' && !!chrome.runtime && !!chrome.runtime.id && !!chrome.storage?.local;
+}
+
 if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
-  chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName === 'local' && changes[STORAGE_KEYS.SETTINGS]?.newValue) {
-      cachedSettings = changes[STORAGE_KEYS.SETTINGS].newValue;
-    }
-  });
+  try {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName === 'local' && changes[STORAGE_KEYS.SETTINGS]?.newValue) {
+        cachedSettings = changes[STORAGE_KEYS.SETTINGS].newValue;
+      }
+    });
+  } catch {
+    // Ignore context invalidation
+  }
 }
 
 export async function getSettings(): Promise<AppSettings> {
   if (cachedSettings) {
     return cachedSettings;
   }
-  const result = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
-  if (!result[STORAGE_KEYS.SETTINGS]) {
-    await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: DEFAULT_SETTINGS });
-    cachedSettings = DEFAULT_SETTINGS;
+  if (!isContextValid()) {
     return DEFAULT_SETTINGS;
   }
-  const stored = result[STORAGE_KEYS.SETTINGS];
-  cachedSettings = {
-    ...DEFAULT_SETTINGS,
-    ...stored,
-    router: { ...DEFAULT_SETTINGS.router, ...(stored.router || {}) },
-    persona: { ...DEFAULT_SETTINGS.persona, ...(stored.persona || {}) },
-    safety: { ...DEFAULT_SETTINGS.safety, ...(stored.safety || {}) },
-  };
-  return cachedSettings;
+  try {
+    const result = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
+    if (!result[STORAGE_KEYS.SETTINGS]) {
+      await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: DEFAULT_SETTINGS });
+      cachedSettings = DEFAULT_SETTINGS;
+      return DEFAULT_SETTINGS;
+    }
+    const stored = result[STORAGE_KEYS.SETTINGS];
+    cachedSettings = {
+      ...DEFAULT_SETTINGS,
+      ...stored,
+      router: { ...DEFAULT_SETTINGS.router, ...(stored.router || {}) },
+      persona: { ...DEFAULT_SETTINGS.persona, ...(stored.persona || {}) },
+      safety: { ...DEFAULT_SETTINGS.safety, ...(stored.safety || {}) },
+    };
+    return cachedSettings;
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
 }
 
 export function saveSettings(partial: Partial<AppSettings>): Promise<AppSettings> {
   savePromiseChain = savePromiseChain.then(async () => {
-    const current = await getSettings();
-    const updated: AppSettings = {
-      ...current,
-      ...partial,
-      router: { ...current.router, ...(partial.router || {}) },
-      persona: { ...current.persona, ...(partial.persona || {}) },
-      safety: { ...current.safety, ...(partial.safety || {}) },
-    };
-    cachedSettings = updated;
-    await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: updated });
-    return updated;
+    if (!isContextValid()) {
+      return cachedSettings || DEFAULT_SETTINGS;
+    }
+    try {
+      const current = await getSettings();
+      const updated: AppSettings = {
+        ...current,
+        ...partial,
+        router: { ...current.router, ...(partial.router || {}) },
+        persona: { ...current.persona, ...(partial.persona || {}) },
+        safety: { ...current.safety, ...(partial.safety || {}) },
+      };
+      cachedSettings = updated;
+      await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: updated });
+      return updated;
+    } catch {
+      return cachedSettings || DEFAULT_SETTINGS;
+    }
   });
   return savePromiseChain;
 }
@@ -145,31 +167,41 @@ export async function setPendingDraft(draft: { threadId: string; text: string; t
 }
 
 export async function getDiscoveredContacts(): Promise<DiscoveredContact[]> {
-  const result = await chrome.storage.local.get(STORAGE_KEYS.CONTACTS);
-  return result[STORAGE_KEYS.CONTACTS] || [];
+  if (!isContextValid()) return [];
+  try {
+    const result = await chrome.storage.local.get(STORAGE_KEYS.CONTACTS);
+    return result[STORAGE_KEYS.CONTACTS] || [];
+  } catch {
+    return [];
+  }
 }
 
 export async function saveDiscoveredContacts(newContacts: DiscoveredContact[]): Promise<DiscoveredContact[]> {
-  const existing = await getDiscoveredContacts();
-  const contactMap = new Map<string, DiscoveredContact>();
+  if (!isContextValid()) return [];
+  try {
+    const existing = await getDiscoveredContacts();
+    const contactMap = new Map<string, DiscoveredContact>();
 
-  for (const c of existing) {
-    contactMap.set(c.id, c);
-  }
-  for (const c of newContacts) {
-    if (c.id && c.name) {
-      const prev = contactMap.get(c.id);
-      contactMap.set(c.id, {
-        id: c.id,
-        name: c.name,
-        avatarUrl: c.avatarUrl || prev?.avatarUrl,
-        snippet: c.snippet || prev?.snippet,
-        lastSeen: Date.now(),
-      });
+    for (const c of existing) {
+      contactMap.set(c.id, c);
     }
-  }
+    for (const c of newContacts) {
+      if (c.id && c.name) {
+        const prev = contactMap.get(c.id);
+        contactMap.set(c.id, {
+          id: c.id,
+          name: c.name,
+          avatarUrl: c.avatarUrl || prev?.avatarUrl,
+          snippet: c.snippet || prev?.snippet,
+          lastSeen: Date.now(),
+        });
+      }
+    }
 
-  const merged = Array.from(contactMap.values()).sort((a, b) => b.lastSeen - a.lastSeen);
-  await chrome.storage.local.set({ [STORAGE_KEYS.CONTACTS]: merged });
-  return merged;
+    const merged = Array.from(contactMap.values()).sort((a, b) => b.lastSeen - a.lastSeen);
+    await chrome.storage.local.set({ [STORAGE_KEYS.CONTACTS]: merged });
+    return merged;
+  } catch {
+    return [];
+  }
 }

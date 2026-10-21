@@ -53,9 +53,9 @@ export const SettingsTab: React.FC<Props> = ({
 
   // Curated AgentRouter primary models
   const PRIMARY_MODELS = [
-    { id: 'gpt-6.1-sol', label: 'gpt-6.1-sol (Recommended - OpenAI Flagship)' },
-    { id: 'gpt-6-astra', label: 'gpt-6-astra (OpenAI Astra - Fast & Warm)' },
-    { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash (DeepSeek Fast - Strict Moderation)' },
+    { id: 'gpt-6.1-sol', label: 'gpt-6.1-sol (Recommended - OpenAI Responses API)' },
+    { id: 'gpt-6-astra', label: 'gpt-6-astra (OpenAI Astra - Responses API)' },
+    { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash (DeepSeek Fast - Strict Filter)' },
     { id: 'claude-opus-5', label: 'claude-opus-5 (Anthropic Opus)' },
     { id: 'glm-5.3', label: 'glm-5.3 (Zhipu AI)' },
   ];
@@ -255,9 +255,9 @@ export const SettingsTab: React.FC<Props> = ({
             <div className="p-2.5 rounded-lg bg-amber-950/40 border border-amber-800/60 text-[11px] text-amber-300/90 flex items-start gap-2">
               <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <div className="space-y-0.5">
-                <span className="font-semibold block text-amber-200">Strict Safety Filter Notice:</span>
+                <span className="font-semibold block text-amber-200">Strict Moderation / Sensitive Words Notice:</span>
                 <span className="text-[10px] text-amber-300/80 leading-normal block">
-                  DeepSeek&apos;s API enforces strict domestic filters that block romantic affection or colloquial slang (&ldquo;jan&rdquo;, &ldquo;ailabiu&rdquo;) with <em>content-blocked</em>. If blocked, the extension auto-fails over to <strong>gpt-6.1-sol</strong>. We recommend keeping <strong>gpt-6.1-sol</strong> selected for casual social chatting.
+                  DeepSeek&apos;s API enforces strict domestic filters that block romantic affection or colloquial slang with <em>&ldquo;sensitive words detected&rdquo;</em> or <em>&ldquo;content-blocked&rdquo;</em>. If triggered, the extension auto-fails over to <strong>gpt-6.1-sol</strong> (OpenAI Responses API). We recommend keeping <strong>gpt-6.1-sol</strong> selected for casual social chatting.
                 </span>
               </div>
             </div>
