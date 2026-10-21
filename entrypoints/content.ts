@@ -2,10 +2,11 @@ import {
   getActiveChatThread,
   getMessageInputElement,
   extractRecentMessages,
+  extractSidebarChatList,
   isMessengerUrl,
 } from '../utils/messenger-dom';
 import { simulateHumanTyping, injectTextInstantly, submitMessage } from '../utils/human-typing';
-import { getSettings } from '../utils/storage';
+import { getSettings, saveDiscoveredContacts } from '../utils/storage';
 
 export default defineContentScript({
   matches: ['*://*.facebook.com/*', '*://*.messenger.com/*'],
@@ -21,8 +22,15 @@ export default defineContentScript({
     let lastSeenMessageText = '';
     let isTypingInProgress = false;
 
-    // Periodically poll for chat switch or thread changes
+    // Periodically poll for chat switch or thread changes and scan sidebar contacts
     setInterval(async () => {
+      // 1. Scan sidebar contacts automatically
+      const sidebarContacts = extractSidebarChatList();
+      if (sidebarContacts.length > 0) {
+        await saveDiscoveredContacts(sidebarContacts);
+      }
+
+      // 2. Check active thread switch
       const activeThread = getActiveChatThread();
       if (!activeThread) return;
 
@@ -114,6 +122,29 @@ export default defineContentScript({
             sendResponse({ success: false, error: err.message });
           } finally {
             isTypingInProgress = false;
+          }
+        } else if (message.type === 'SCAN_CHATS_REQUEST') {
+          const contacts = extractSidebarChatList();
+          if (contacts.length > 0) {
+            await saveDiscoveredContacts(contacts);
+          }
+          sendResponse({ success: true, contacts });
+        } else if (message.type === 'TRIGGER_REPLY_NOW') {
+          const activeThread = getActiveChatThread();
+          const messages = extractRecentMessages(15);
+          if (activeThread && messages.length > 0) {
+            try {
+              chrome.runtime.sendMessage({
+                type: 'TRIGGER_FORCE_REPLY',
+                thread: activeThread,
+                messages: messages,
+              });
+              sendResponse({ success: true });
+            } catch (err: any) {
+              sendResponse({ success: false, error: err.message });
+            }
+          } else {
+            sendResponse({ success: false, error: 'No active chat or messages detected' });
           }
         } else if (message.type === 'APPROVE_AND_SEND') {
           const inputEl = getMessageInputElement();

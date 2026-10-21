@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatThread } from '../types';
+import type { ChatMessage, ChatThread, DiscoveredContact } from '../types';
 
 /**
  * Finds the currently active chat's thread info from Messenger DOM and URL.
@@ -71,16 +71,31 @@ export function getMessageInputElement(): HTMLElement | null {
  */
 export function extractRecentMessages(limit = 15): ChatMessage[] {
   const mainArea = document.querySelector('[role="main"]') || document.body;
+  const inputEl = getMessageInputElement();
   const messages: ChatMessage[] = [];
 
+  // Calculate chat center based on the message input box
+  // This is the most accurate reference because the input box spans exactly the conversation width
+  let chatCenter = window.innerWidth / 2;
+  let chatLeft = 0;
+  let chatWidth = window.innerWidth;
+
+  if (inputEl) {
+    const inputRect = inputEl.getBoundingClientRect();
+    chatLeft = inputRect.left;
+    chatWidth = inputRect.width;
+    chatCenter = inputRect.left + inputRect.width / 2;
+  } else {
+    const mainRect = mainArea.getBoundingClientRect();
+    chatLeft = mainRect.left;
+    chatWidth = mainRect.width;
+    chatCenter = mainRect.left + mainRect.width / 2;
+  }
+
   // Find message elements. In Facebook, text is placed in dir="auto" containers inside the message area.
-  // We look for text nodes inside the conversation viewport
   const messageNodes = Array.from(
     mainArea.querySelectorAll<HTMLElement>('div[dir="auto"], span[dir="auto"]')
   );
-
-  const mainRect = mainArea.getBoundingClientRect();
-  const mainCenter = mainRect.left + mainRect.width / 2;
 
   // Filter out headers, placeholders, timestamps, or system info
   const validTextNodes: { el: HTMLElement; text: string; isMe: boolean }[] = [];
@@ -97,9 +112,17 @@ export function extractRecentMessages(limit = 15): ChatMessage[] {
     // Exclude zero-dimension or off-screen elements
     if (rect.width === 0 || rect.height === 0 || rect.bottom < 0) continue;
 
-    // Determine outgoing ('me') vs incoming ('them') based on horizontal position relative to main area center
-    // In Messenger web, outgoing bubbles are aligned to the right half; incoming to the left half
-    const isMe = rect.left > mainCenter - 40;
+    // Must be horizontally within the chat column
+    if (rect.right < chatLeft - 20) continue;
+
+    // Strategy 1: Proximity to friend's avatar image (incoming bubbles always have the avatar on the left)
+    const rowContainer = node.closest('[role="row"]') || node.closest('div[class*="x78zum5"]') || node.parentElement;
+    const hasIncomingAvatar = rowContainer?.querySelector('img[alt], div[role="img"]') !== null &&
+      rect.left < chatCenter;
+
+    // Strategy 2: Horizontal alignment relative to the input box midpoint
+    // Outgoing bubbles start past 42% of the input box width from the right
+    const isMe = !hasIncomingAvatar && (rect.left > chatCenter - 25);
 
     validTextNodes.push({ el: node, text, isMe });
   }
@@ -129,6 +152,79 @@ export function extractRecentMessages(limit = 15): ChatMessage[] {
   }
 
   return messages;
+}
+
+/**
+ * Automatically extracts the full list of contacts and conversations from Messenger's sidebar
+ */
+export function extractSidebarChatList(): DiscoveredContact[] {
+  const contacts: DiscoveredContact[] = [];
+  const seenIds = new Set<string>();
+
+  // Look for chat links in sidebar/navigation
+  const chatLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="/t/"]'));
+
+  for (const link of chatLinks) {
+    const href = link.getAttribute('href') || '';
+    const match = href.match(/\/t\/([0-9a-zA-Z._-]+)/);
+    if (!match) continue;
+
+    const threadId = match[1];
+    if (seenIds.has(threadId) || threadId === 'unknown') continue;
+
+    let contactName = '';
+    let avatarUrl: string | undefined = undefined;
+    let snippet: string | undefined = undefined;
+
+    // Strategy 1: Check img alt and src
+    const imgEl = link.querySelector<HTMLImageElement>('img');
+    if (imgEl) {
+      avatarUrl = imgEl.src;
+      const alt = imgEl.getAttribute('alt')?.trim();
+      if (alt && !/profile photo|profile picture|story|avatar/i.test(alt)) {
+        contactName = alt;
+      }
+    }
+
+    // Strategy 2: Check text spans inside the link
+    const textNodes = Array.from(link.querySelectorAll<HTMLElement>('span[dir="auto"], div[dir="auto"]'))
+      .map((el) => el.innerText?.trim())
+      .filter((t) => Boolean(t) && t.length > 0);
+
+    if (textNodes.length > 0) {
+      if (!contactName) {
+        contactName = textNodes[0];
+      }
+      if (textNodes.length > 1) {
+        // Find snippet that is not a short timestamp (e.g. not "10m", "1h", "2d")
+        const candidateSnippet = textNodes.slice(1).find((t) => t !== contactName && !/^\d+[smhdw]$/i.test(t));
+        if (candidateSnippet) {
+          snippet = candidateSnippet;
+        }
+      }
+    }
+
+    // Fallback: aria-label on link or parent
+    if (!contactName) {
+      const aria = link.getAttribute('aria-label') || link.closest('[role="row"]')?.getAttribute('aria-label');
+      if (aria) {
+        contactName = aria.replace(/conversation with/i, '').replace(/chat with/i, '').trim();
+      }
+    }
+
+    if (contactName && contactName.length > 0) {
+      seenIds.add(threadId);
+      contacts.push({
+        id: threadId,
+        name: contactName,
+        avatarUrl,
+        snippet,
+        lastSeen: Date.now(),
+      });
+    }
+  }
+
+  return contacts;
 }
 
 /**

@@ -42,6 +42,9 @@ export default defineBackground(() => {
         } else if (message.type === 'NEW_MESSAGES_DETECTED') {
           await handleNewIncomingMessages(message.thread, message.messages, sender.tab?.id);
           sendResponse({ success: true });
+        } else if (message.type === 'TRIGGER_FORCE_REPLY') {
+          await executeGenerationAndReply(message.thread, message.messages, sender.tab?.id);
+          sendResponse({ success: true });
         } else if (message.type === 'APPROVE_AND_SEND') {
           if (sender.tab?.id) {
             await chrome.tabs.sendMessage(sender.tab.id, {
@@ -66,6 +69,18 @@ export default defineBackground(() => {
             message: `Approved & Sent: "${message.text}"`,
           });
           sendResponse({ success: true });
+        } else if (message.type === 'SCAN_CHATS_REQUEST') {
+          const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (activeTab?.id) {
+            try {
+              const resp = await chrome.tabs.sendMessage(activeTab.id, { type: 'SCAN_CHATS_REQUEST' });
+              sendResponse(resp);
+            } catch (tabErr) {
+              sendResponse({ success: false, error: 'Could not communicate with Messenger tab' });
+            }
+          } else {
+            sendResponse({ success: false, error: 'No active tab found' });
+          }
         } else if (message.type === 'REJECT_DRAFT') {
           await setPendingDraft(null);
           await setBotStatus('idle');
@@ -99,9 +114,10 @@ export default defineBackground(() => {
       return;
     }
 
-    // Check if this thread/contact is targeted
+    // Check if this thread/contact is targeted (or if target list is empty, default to active chat)
     const isTargeted =
       settings.targetAllContacts ||
+      settings.targetContacts.length === 0 ||
       settings.targetContacts.includes(thread.id) ||
       settings.targetContacts.some((name) =>
         thread.name.toLowerCase().includes(name.toLowerCase())

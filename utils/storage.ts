@@ -1,4 +1,4 @@
-import type { AppSettings, ActivityLog, ChatThread, BotStatus } from '../types';
+import type { AppSettings, ActivityLog, ChatThread, BotStatus, DiscoveredContact } from '../types';
 
 export const DEFAULT_AGENTROUTER_MODELS = [
   'gpt-6.1-sol',
@@ -32,9 +32,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
     maxAutoRepliesPerSession: 30,
     requireConfirmationForSensitiveWords: true,
   },
-  botMode: 'manual_approval', // Safe default so user can test before turning on full auto-pilot
+  botMode: 'manual_approval',
   targetContacts: [],
-  targetAllContacts: false,
+  targetAllContacts: true, // Default to true so it works immediately on active chat!
 };
 
 const STORAGE_KEYS = {
@@ -43,25 +43,28 @@ const STORAGE_KEYS = {
   CURRENT_THREAD: 'social_chatbot_current_thread',
   BOT_STATUS: 'social_chatbot_bot_status',
   PENDING_DRAFT: 'social_chatbot_pending_draft',
+  CONTACTS: 'social_chatbot_contacts',
 };
 
 export async function getSettings(): Promise<AppSettings> {
   const result = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
   if (!result[STORAGE_KEYS.SETTINGS]) {
-    await saveSettings(DEFAULT_SETTINGS);
+    await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: DEFAULT_SETTINGS });
     return DEFAULT_SETTINGS;
   }
+  const stored = result[STORAGE_KEYS.SETTINGS];
   return {
     ...DEFAULT_SETTINGS,
-    ...result[STORAGE_KEYS.SETTINGS],
-    router: { ...DEFAULT_SETTINGS.router, ...result[STORAGE_KEYS.SETTINGS]?.router },
-    persona: { ...DEFAULT_SETTINGS.persona, ...result[STORAGE_KEYS.SETTINGS]?.persona },
-    safety: { ...DEFAULT_SETTINGS.safety, ...result[STORAGE_KEYS.SETTINGS]?.safety },
+    ...stored,
+    router: { ...DEFAULT_SETTINGS.router, ...(stored.router || {}) },
+    persona: { ...DEFAULT_SETTINGS.persona, ...(stored.persona || {}) },
+    safety: { ...DEFAULT_SETTINGS.safety, ...(stored.safety || {}) },
   };
 }
 
-export async function saveSettings(settings: Partial<AppSettings>): Promise<void> {
-  const current = await getSettings();
+export async function saveSettings(settings: Partial<AppSettings>): Promise<AppSettings> {
+  const result = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
+  const current = result[STORAGE_KEYS.SETTINGS] || DEFAULT_SETTINGS;
   const updated: AppSettings = {
     ...current,
     ...settings,
@@ -70,6 +73,7 @@ export async function saveSettings(settings: Partial<AppSettings>): Promise<void
     safety: { ...current.safety, ...(settings.safety || {}) },
   };
   await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: updated });
+  return updated;
 }
 
 export async function getLogs(): Promise<ActivityLog[]> {
@@ -118,4 +122,34 @@ export async function getPendingDraft(): Promise<{ threadId: string; text: strin
 
 export async function setPendingDraft(draft: { threadId: string; text: string; threadName: string } | null): Promise<void> {
   await chrome.storage.local.set({ [STORAGE_KEYS.PENDING_DRAFT]: draft });
+}
+
+export async function getDiscoveredContacts(): Promise<DiscoveredContact[]> {
+  const result = await chrome.storage.local.get(STORAGE_KEYS.CONTACTS);
+  return result[STORAGE_KEYS.CONTACTS] || [];
+}
+
+export async function saveDiscoveredContacts(newContacts: DiscoveredContact[]): Promise<DiscoveredContact[]> {
+  const existing = await getDiscoveredContacts();
+  const contactMap = new Map<string, DiscoveredContact>();
+
+  for (const c of existing) {
+    contactMap.set(c.id, c);
+  }
+  for (const c of newContacts) {
+    if (c.id && c.name) {
+      const prev = contactMap.get(c.id);
+      contactMap.set(c.id, {
+        id: c.id,
+        name: c.name,
+        avatarUrl: c.avatarUrl || prev?.avatarUrl,
+        snippet: c.snippet || prev?.snippet,
+        lastSeen: Date.now(),
+      });
+    }
+  }
+
+  const merged = Array.from(contactMap.values()).sort((a, b) => b.lastSeen - a.lastSeen);
+  await chrome.storage.local.set({ [STORAGE_KEYS.CONTACTS]: merged });
+  return merged;
 }

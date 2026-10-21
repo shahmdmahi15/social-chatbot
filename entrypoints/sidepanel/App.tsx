@@ -5,6 +5,7 @@ import type {
   ChatThread,
   BotStatus,
   BotMode,
+  DiscoveredContact,
 } from '../../types';
 import {
   getSettings,
@@ -13,6 +14,7 @@ import {
   getCurrentThread,
   getBotStatus,
   getPendingDraft,
+  getDiscoveredContacts,
   DEFAULT_SETTINGS,
 } from '../../utils/storage';
 import { Header } from './components/Header';
@@ -26,6 +28,7 @@ export default function App() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [status, setStatus] = useState<BotStatus>('idle');
   const [currentThread, setCurrentThreadState] = useState<ChatThread | null>(null);
+  const [discoveredContacts, setDiscoveredContacts] = useState<DiscoveredContact[]>([]);
   const [pendingDraft, setPendingDraftState] = useState<{
     threadId: string;
     text: string;
@@ -37,19 +40,21 @@ export default function App() {
   // Load initial state
   const refreshAllState = async () => {
     try {
-      const [loadedSettings, loadedStatus, loadedThread, loadedDraft, loadedLogs] =
+      const [loadedSettings, loadedStatus, loadedThread, loadedDraft, loadedLogs, loadedContacts] =
         await Promise.all([
           getSettings(),
           getBotStatus(),
           getCurrentThread(),
           getPendingDraft(),
           getLogs(),
+          getDiscoveredContacts(),
         ]);
       setSettings(loadedSettings);
       setStatus(loadedStatus);
       setCurrentThreadState(loadedThread);
       setPendingDraftState(loadedDraft);
       setLogs(loadedLogs);
+      setDiscoveredContacts(loadedContacts);
     } catch (err) {
       console.error('Failed to load storage state:', err);
     }
@@ -69,6 +74,9 @@ export default function App() {
       if (changes.social_chatbot_current_thread) {
         setCurrentThreadState(changes.social_chatbot_current_thread.newValue);
       }
+      if (changes.social_chatbot_contacts) {
+        setDiscoveredContacts(changes.social_chatbot_contacts.newValue || []);
+      }
       if (changes.social_chatbot_pending_draft) {
         setPendingDraftState(changes.social_chatbot_pending_draft.newValue);
       }
@@ -78,15 +86,46 @@ export default function App() {
     };
 
     chrome.storage.onChanged.addListener(handleStorageChange);
+
     return () => {
       chrome.storage.onChanged.removeListener(handleStorageChange);
     };
   }, []);
 
+  const handleScanChats = async () => {
+    try {
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (activeTab?.id) {
+        await chrome.tabs.sendMessage(activeTab.id, { type: 'SCAN_CHATS_REQUEST' });
+      }
+      const updated = await getDiscoveredContacts();
+      setDiscoveredContacts(updated);
+    } catch (err) {
+      console.warn('Could not scan chats:', err);
+    }
+  };
+
+  const handleTriggerReplyNow = async () => {
+    try {
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (activeTab?.id) {
+        chrome.tabs.sendMessage(activeTab.id, { type: 'TRIGGER_REPLY_NOW' });
+      }
+    } catch (err) {
+      console.warn('Could not trigger reply now:', err);
+    }
+  };
+
   const handleUpdateSettings = async (partial: Partial<AppSettings>) => {
-    const updated = { ...settings, ...partial };
+    const updated: AppSettings = {
+      ...settings,
+      ...partial,
+      router: { ...settings.router, ...(partial.router || {}) },
+      persona: { ...settings.persona, ...(partial.persona || {}) },
+      safety: { ...settings.safety, ...(partial.safety || {}) },
+    };
     setSettings(updated);
-    await saveSettings(partial);
+    await saveSettings(updated);
   };
 
   const handleModeChange = async (mode: BotMode) => {
@@ -127,6 +166,7 @@ export default function App() {
         status={status}
         botMode={settings.botMode}
         onModeChange={handleModeChange}
+        onTriggerReplyNow={handleTriggerReplyNow}
       />
 
       {/* Navigation Tabs */}
@@ -190,12 +230,15 @@ export default function App() {
         {activeTab === 'monitor' && (
           <MonitorTab
             currentThread={currentThread}
+            discoveredContacts={discoveredContacts}
             settings={settings}
             pendingDraft={pendingDraft}
             logs={logs}
             onUpdateSettings={handleUpdateSettings}
             onApproveDraft={handleApproveDraft}
             onRejectDraft={handleRejectDraft}
+            onScanChats={handleScanChats}
+            onTriggerReplyNow={handleTriggerReplyNow}
           />
         )}
 

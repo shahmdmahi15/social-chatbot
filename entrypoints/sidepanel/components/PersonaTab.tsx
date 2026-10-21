@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type { PersonaConfig, ChatLanguage } from '../../../types';
 import {
   Sparkles,
@@ -8,6 +8,7 @@ import {
   Bot,
   Terminal,
   Info,
+  Check,
 } from 'lucide-react';
 
 interface Props {
@@ -16,6 +17,13 @@ interface Props {
 }
 
 export const PersonaTab: React.FC<Props> = ({ persona, onChange }) => {
+  const [saved, setSaved] = useState(false);
+
+  const handleManualSave = () => {
+    onChange({ ...persona });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
   return (
     <div className="space-y-4">
       {/* 1. Multi-Language Intelligence Selector */}
@@ -135,6 +143,29 @@ export const PersonaTab: React.FC<Props> = ({ persona, onChange }) => {
           />
         </div>
       </div>
+
+      {/* Explicit Save Persona Button */}
+      <button
+        type="button"
+        onClick={handleManualSave}
+        className={`w-full py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 shadow-md transition-all ${
+          saved
+            ? 'bg-emerald-600 text-white shadow-emerald-500/20'
+            : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-500/20'
+        }`}
+      >
+        {saved ? (
+          <>
+            <Check className="w-4 h-4" />
+            ✓ Persona & Instructions Saved!
+          </>
+        ) : (
+          <>
+            <Sparkles className="w-3.5 h-3.5" />
+            Save Persona & Instructions
+          </>
+        )}
+      </button>
     </div>
   );
 };

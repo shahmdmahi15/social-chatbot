@@ -12,6 +12,14 @@ export interface ChatMessage {
   timestamp: number;
 }
 
+export interface DiscoveredContact {
+  id: string;
+  name: string;
+  avatarUrl?: string;
+  snippet?: string;
+  lastSeen: number;
+}
+
 export interface ChatThread {
   id: string;
   name: string;
@@ -70,11 +78,14 @@ export type ExtensionMessage =
   | { type: 'NEW_MESSAGES_DETECTED'; thread: ChatThread; messages: ChatMessage[] }
   | { type: 'CHAT_SWITCHED'; thread: ChatThread }
   | { type: 'TRIGGER_GENERATION'; thread: ChatThread; messages: ChatMessage[] }
+  | { type: 'TRIGGER_FORCE_REPLY'; thread: ChatThread; messages: ChatMessage[] }
   | { type: 'RESPONSE_GENERATED'; thread: ChatThread; replyText: string; mode: BotMode }
   | { type: 'APPROVE_AND_SEND'; threadId: string; text: string }
   | { type: 'REJECT_DRAFT'; threadId: string }
   | { type: 'INJECT_TYPING_PAYLOAD'; text: string; autoSend: boolean }
   | { type: 'LOG_EVENT'; log: ActivityLog }
   | { type: 'STATUS_UPDATE'; status: BotStatus; statusDetail?: string }
+  | { type: 'CHAT_LIST_DISCOVERED'; contacts: DiscoveredContact[] }
+  | { type: 'SCAN_CHATS_REQUEST' }
   | { type: 'GET_STATE' }
   | { type: 'STATE_UPDATE'; settings: AppSettings; status: BotStatus; currentThread?: ChatThread };

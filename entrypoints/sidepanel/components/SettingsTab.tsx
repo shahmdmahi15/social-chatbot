@@ -36,6 +36,14 @@ export const SettingsTab: React.FC<Props> = ({
   const [fetchingModels, setFetchingModels] = useState(false);
   const [fetchMessage, setFetchMessage] = useState<{ success: boolean; text: string } | null>(null);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [savedSettings, setSavedSettings] = useState(false);
+
+  const handleManualSave = () => {
+    onUpdateRouter({ ...router });
+    onUpdateSafety({ ...safety });
+    setSavedSettings(true);
+    setTimeout(() => setSavedSettings(false), 2000);
+  };
 
   // Curated AgentRouter primary models
   const PRIMARY_MODELS = [
@@ -217,26 +225,49 @@ export const SettingsTab: React.FC<Props> = ({
             onChange={(e) => onUpdateRouter({ model: e.target.value })}
             className="w-full px-2.5 py-1.5 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:border-cyan-500 font-mono"
           >
-            <optgroup label="AgentRouter Recommended Models">
+            {router.availableModels && router.availableModels.length > 0 && (
+              <optgroup label={`✓ Active on Your Account (${router.availableModels.length})`}>
+                {router.availableModels.map((id) => (
+                  <option key={`account-${id}`} value={id}>
+                    {id} (Active on your account)
+                  </option>
+                ))}
+              </optgroup>
+            )}
+
+            <optgroup label="AgentRouter Recommended Presets">
               {PRIMARY_MODELS.map((m) => (
-                <option key={m.id} value={m.id}>
+                <option key={`preset-${m.id}`} value={m.id}>
                   {m.label}
                 </option>
               ))}
             </optgroup>
-
-            {router.availableModels && router.availableModels.length > 0 && (
-              <optgroup label={`Fetched from Your Account (${router.availableModels.length})`}>
-                {router.availableModels
-                  .filter((id) => !PRIMARY_MODELS.some((pm) => pm.id === id))
-                  .map((id) => (
-                    <option key={id} value={id}>
-                      {id}
-                    </option>
-                  ))}
-              </optgroup>
-            )}
           </select>
+
+          {/* Active Model Badges */}
+          {router.availableModels && router.availableModels.length > 0 && (
+            <div className="p-2 rounded-lg bg-slate-950/80 border border-slate-800 space-y-1">
+              <span className="text-[10px] text-emerald-400 font-semibold uppercase tracking-wider block">
+                Active Models Verified on Your Account ({router.availableModels.length}):
+              </span>
+              <div className="flex flex-wrap gap-1">
+                {router.availableModels.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => onUpdateRouter({ model: m })}
+                    className={`px-2 py-0.5 rounded text-[11px] font-mono border transition-all ${
+                      router.model === m
+                        ? 'bg-emerald-950 text-emerald-300 border-emerald-500 font-semibold shadow-sm'
+                        : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'
+                    }`}
+                  >
+                    ✓ {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Or enter custom model ID */}
           <div className="flex items-center gap-1.5 mt-1">
@@ -365,6 +396,29 @@ export const SettingsTab: React.FC<Props> = ({
           />
         </div>
       </div>
+
+      {/* Save Settings Confirmation Button */}
+      <button
+        type="button"
+        onClick={handleManualSave}
+        className={`w-full py-2.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 shadow-md transition-all ${
+          savedSettings
+            ? 'bg-emerald-600 text-white shadow-emerald-500/20'
+            : 'bg-gradient-to-r from-cyan-600 to-indigo-600 hover:opacity-90 text-white shadow-cyan-500/20'
+        }`}
+      >
+        {savedSettings ? (
+          <>
+            <CheckCircle2 className="w-4 h-4" />
+            ✓ Settings Successfully Saved!
+          </>
+        ) : (
+          <>
+            <Shield className="w-4 h-4" />
+            Save API & Safety Settings
+          </>
+        )}
+      </button>
     </div>
   );
 };

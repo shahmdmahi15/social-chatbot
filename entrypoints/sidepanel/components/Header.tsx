@@ -7,12 +7,13 @@ interface Props {
   status: BotStatus;
   botMode: BotMode;
   onModeChange: (mode: BotMode) => void;
+  onTriggerReplyNow?: () => void;
 }
 
-export const Header: React.FC<Props> = ({ status, botMode, onModeChange }) => {
+export const Header: React.FC<Props> = ({ status, botMode, onModeChange, onTriggerReplyNow }) => {
   return (
-    <header className="px-4 py-3 bg-slate-900/90 border-b border-slate-800 sticky top-0 z-20 backdrop-blur-md">
-      <div className="flex items-center justify-between gap-2 mb-2.5">
+    <header className="px-4 py-3 bg-slate-900/90 border-b border-slate-800 sticky top-0 z-20 backdrop-blur-md space-y-2.5">
+      <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
             <MessageSquareText className="w-4 h-4 text-white" />
@@ -66,6 +67,17 @@ export const Header: React.FC<Props> = ({ status, botMode, onModeChange }) => {
           Off
         </button>
       </div>
+
+      {/* Quick Instant Reply Button if bot is enabled */}
+      {botMode !== 'disabled' && onTriggerReplyNow && (
+        <button
+          onClick={onTriggerReplyNow}
+          className="w-full py-1.5 px-3 rounded-lg text-xs font-semibold bg-gradient-to-r from-cyan-500 via-indigo-500 to-purple-600 hover:opacity-90 text-white flex items-center justify-center gap-1.5 shadow-md shadow-indigo-500/20 transition-all"
+        >
+          <Zap className="w-3.5 h-3.5 animate-pulse" />
+          ⚡ Trigger Reply to Open Chat Now
+        </button>
+      )}
     </header>
   );
 };
